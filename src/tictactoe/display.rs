@@ -1,6 +1,5 @@
 use std::fmt;
-use crate::tictactoe::game::Cell;
-use crate::tictactoe::game::GameBoard;
+use crate::tictactoe::game::*;
 
 
 impl fmt::Display for Cell {
@@ -8,8 +7,8 @@ impl fmt::Display for Cell {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fn cell_to_char(cell: &Cell) -> char {
             match &cell.0 {
-                Some(true) => 'X',
-                Some(false) => 'O',
+                Some(Player::Cross) => 'X',
+                Some(Player::Circle) => 'O',
                 None => '_',
             }
         }

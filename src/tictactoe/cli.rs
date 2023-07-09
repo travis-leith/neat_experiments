@@ -34,9 +34,15 @@ fn get_first_player_from_user() -> bool {
 }
 
 fn start_game() -> GameState {
-    let user_is_first = get_first_player_from_user();
+    let player_turn = 
+        if get_first_player_from_user() {
+            Player::Cross
+        } else {
+            Player::Circle
+        };
+
     let gameboard = empty_game_board();
-    GameState::Playing(PlayingGameState { gameboard, user_turn: user_is_first })
+    GameState::Playing(PlayingGameState { gameboard, player_turn })
 }
 
 fn get_random_move(gameboard: &GameBoard) -> Option<UserMove> {
@@ -67,7 +73,7 @@ fn get_random_move(gameboard: &GameBoard) -> Option<UserMove> {
 fn do_ai_move(gameboard: &mut GameBoard) -> bool {
     match get_random_move(gameboard) {
        Some(user_move) => {
-           apply_move(gameboard, user_move, false)
+           apply_move(gameboard, user_move, Player::Circle)
        },
        None => false
     }
@@ -104,7 +110,7 @@ fn get_user_move() -> UserMove {
 
 fn do_user_move(gameboard: &mut GameBoard) -> bool {
     let user_move = get_user_move();
-    apply_move(gameboard, user_move, true)
+    apply_move(gameboard, user_move, Player::Cross)
 }
 
 fn ask_user_for_new_game() -> bool {
@@ -115,8 +121,8 @@ fn ask_user_for_new_game() -> bool {
 fn end_game(game_over_state: &GameOverState) {
     match game_over_state {
         GameOverState::Tied => println!("No winners - game is tied!"),
-        GameOverState::Won(true) => println!("User (you) have won!"),
-        GameOverState::Won(false) => println!("AI has won!")
+        GameOverState::Won(Player::Cross) => println!("User (you) have won!"),
+        GameOverState::Won(Player::Circle) => println!("AI has won!")
     }
 }
 
@@ -126,16 +132,19 @@ fn transition_gamestate(gamestate: &mut GameState) {
                 *gamestate = start_game()
         },
         GameState::Playing(playing_state) => {
-            if playing_state.user_turn {
-                if do_user_move(&mut playing_state.gameboard) {
-                    playing_state.user_turn = false;
-                    
+            match playing_state.player_turn {
+                Player::Cross => {
+                    if do_user_move(&mut playing_state.gameboard) {
+                        playing_state.player_turn = Player::Circle;
+                    }
+                    true
+                },
+                Player::Circle => {
+                    playing_state.player_turn = Player::Cross;
+                    do_ai_move(&mut playing_state.gameboard)
                 }
-                true
-            } else {
-                playing_state.user_turn = true;
-                do_ai_move(&mut playing_state.gameboard)
             };
+
             if let Some(game_over_state) = game_is_over(&playing_state.gameboard) {
                 *gamestate = GameState::GameOver(game_over_state);
             }

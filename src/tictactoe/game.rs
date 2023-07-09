@@ -1,4 +1,10 @@
-pub struct Cell(pub Option<bool>);
+#[derive(PartialEq, Copy, Clone)]
+pub enum Player {
+    Cross,
+    Circle
+}
+
+pub struct Cell(pub Option<Player>);
 
 pub struct GameBoard {
     pub top_lft: Cell,
@@ -27,12 +33,12 @@ pub enum UserMove {
 
 pub struct PlayingGameState {
     pub gameboard: GameBoard,
-    pub user_turn: bool
+    pub player_turn: Player
 }
 
 pub enum GameOverState {
     Tied,
-    Won(bool)
+    Won(Player)
 }
 
 pub enum GameState {
@@ -56,8 +62,8 @@ pub fn empty_game_board() -> GameBoard {
     }
 }
 
-pub fn apply_move(gameboard: &mut GameBoard, user_move: UserMove, is_user: bool) -> bool {
-    fn check_assign(cell: &mut Cell, val: bool) -> bool {
+pub fn apply_move(gameboard: &mut GameBoard, user_move: UserMove, player: Player) -> bool {
+    fn check_assign(cell: &mut Cell, val: Player) -> bool {
         if cell.0 == None {
             *cell = Cell(Some(val)); //TODO: can a closure be used to eliminate the val param?
             true
@@ -66,15 +72,15 @@ pub fn apply_move(gameboard: &mut GameBoard, user_move: UserMove, is_user: bool)
         }
     } 
     match user_move {
-        UserMove::TopLft => check_assign(&mut gameboard.top_lft, is_user),
-        UserMove::TopMid => check_assign(&mut gameboard.top_mid, is_user),
-        UserMove::TopRgt => check_assign(&mut gameboard.top_rgt, is_user),
-        UserMove::MidLft => check_assign(&mut gameboard.mid_lft, is_user),
-        UserMove::MidMid => check_assign(&mut gameboard.mid_mid, is_user),
-        UserMove::MidRgt => check_assign(&mut gameboard.mid_rgt, is_user),
-        UserMove::BotLft => check_assign(&mut gameboard.bot_lft, is_user),
-        UserMove::BotMid => check_assign(&mut gameboard.bot_mid, is_user),
-        UserMove::BotRgt => check_assign(&mut gameboard.bot_rgt, is_user)
+        UserMove::TopLft => check_assign(&mut gameboard.top_lft, player),
+        UserMove::TopMid => check_assign(&mut gameboard.top_mid, player),
+        UserMove::TopRgt => check_assign(&mut gameboard.top_rgt, player),
+        UserMove::MidLft => check_assign(&mut gameboard.mid_lft, player),
+        UserMove::MidMid => check_assign(&mut gameboard.mid_mid, player),
+        UserMove::MidRgt => check_assign(&mut gameboard.mid_rgt, player),
+        UserMove::BotLft => check_assign(&mut gameboard.bot_lft, player),
+        UserMove::BotMid => check_assign(&mut gameboard.bot_mid, player),
+        UserMove::BotRgt => check_assign(&mut gameboard.bot_rgt, player)
     }
 }
 
@@ -90,8 +96,8 @@ fn game_is_tied(gameboard: &GameBoard) -> bool {
     gameboard.bot_rgt.0.is_some()
 }
 
-fn game_is_won(gameboard: &GameBoard) -> Option<bool> {
-    fn win_line(c1: &Cell, c2: &Cell, c3: &Cell) -> Option<bool> {
+fn game_is_won(gameboard: &GameBoard) -> Option<Player> {
+    fn win_line(c1: &Cell, c2: &Cell, c3: &Cell) -> Option<Player> {
         let b = 
             c1.0.is_some() &&
             c1.0 == c2.0 &&
