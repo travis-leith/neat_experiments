@@ -45,72 +45,65 @@ fn start_game() -> GameState {
     GameState::Playing(PlayingGameState { gameboard, player_turn })
 }
 
-fn get_random_move(gameboard: &GameBoard) -> Option<UserMove> {
-    fn make_move(x: &Cell, m:UserMove) -> Option<UserMove>{
+fn get_random_move(gameboard: &GameBoard) -> Option<PlayerMove> {
+    fn make_move(x: &Cell, m:PlayerMove) -> Option<PlayerMove>{
         match x.0 {
             None => Some(m),
             _    => None
         }
     }
 
-    let possible_moves: [Option<UserMove>; 9] = [
-        make_move(&gameboard.top_lft, UserMove::TopLft),
-        make_move(&gameboard.top_mid, UserMove::TopMid),
-        make_move(&gameboard.top_rgt, UserMove::TopRgt),
-        make_move(&gameboard.mid_lft, UserMove::MidLft),
-        make_move(&gameboard.mid_mid, UserMove::MidMid),
-        make_move(&gameboard.mid_rgt, UserMove::MidRgt),
-        make_move(&gameboard.bot_lft, UserMove::BotLft),
-        make_move(&gameboard.bot_mid, UserMove::BotMid),
-        make_move(&gameboard.bot_rgt, UserMove::BotRgt),
+    let possible_moves: [Option<PlayerMove>; 9] = [
+        make_move(&gameboard.top_lft, PlayerMove::TopLft),
+        make_move(&gameboard.top_mid, PlayerMove::TopMid),
+        make_move(&gameboard.top_rgt, PlayerMove::TopRgt),
+        make_move(&gameboard.mid_lft, PlayerMove::MidLft),
+        make_move(&gameboard.mid_mid, PlayerMove::MidMid),
+        make_move(&gameboard.mid_rgt, PlayerMove::MidRgt),
+        make_move(&gameboard.bot_lft, PlayerMove::BotLft),
+        make_move(&gameboard.bot_mid, PlayerMove::BotMid),
+        make_move(&gameboard.bot_rgt, PlayerMove::BotRgt),
     ];
 
-    let possible_moves: Vec<UserMove> = possible_moves.iter().flatten().cloned().collect();
+    let possible_moves: Vec<PlayerMove> = possible_moves.iter().flatten().cloned().collect();
     let mut rng = rand::thread_rng();
     possible_moves.choose(&mut rng).copied()
 }
 
-fn do_ai_move(gameboard: &mut GameBoard) -> bool {
+fn get_ai_move(gameboard: &GameBoard) -> PlayerMove {
     match get_random_move(gameboard) {
-       Some(user_move) => {
-           apply_move(gameboard, user_move, Player::Circle)
-       },
-       None => false
+        Some(player_move) => player_move,
+        None => PlayerMove::TopLft
     }
 }
 
-fn string_to_user_move(s: String) -> Option<UserMove> {
+fn string_to_player_move(s: String) -> Option<PlayerMove> {
     match s.to_lowercase().as_str() {
-        "q" => Some(UserMove::TopLft),
-        "w" => Some(UserMove::TopMid),
-        "e" => Some(UserMove::TopRgt),
-        "a" => Some(UserMove::MidLft),
-        "s" => Some(UserMove::MidMid),
-        "d" => Some(UserMove::MidRgt),
-        "z" => Some(UserMove::BotLft),
-        "x" => Some(UserMove::BotMid),
-        "c" => Some(UserMove::BotRgt),
+        "q" => Some(PlayerMove::TopLft),
+        "w" => Some(PlayerMove::TopMid),
+        "e" => Some(PlayerMove::TopRgt),
+        "a" => Some(PlayerMove::MidLft),
+        "s" => Some(PlayerMove::MidMid),
+        "d" => Some(PlayerMove::MidRgt),
+        "z" => Some(PlayerMove::BotLft),
+        "x" => Some(PlayerMove::BotMid),
+        "c" => Some(PlayerMove::BotRgt),
         _   => None
     }
 }
 
-fn maybe_get_user_move() -> Option<UserMove> {
+fn maybe_get_user_move() -> Option<PlayerMove> {
     println!("Select move from qweasdzxc");
     let stdin = io::stdin();
     let mut iterator = stdin.lock().lines();
     let line1 = iterator.next().unwrap().unwrap();
 
-    string_to_user_move(line1)
+    string_to_player_move(line1)
 }
 
-fn get_user_move() -> UserMove {
+fn get_user_move() -> PlayerMove {
     let f = || maybe_get_user_move();
     get_valid_input_from_user(f)
-}
-
-fn do_user_move(gameboard: &mut GameBoard) -> bool {
-    let user_move = get_user_move();
-    apply_move(gameboard, user_move, Player::Cross)
 }
 
 fn ask_user_for_new_game() -> bool {
@@ -132,18 +125,15 @@ fn transition_gamestate(gamestate: &mut GameState) {
                 *gamestate = start_game()
         },
         GameState::Playing(playing_state) => {
-            match playing_state.player_turn {
-                Player::Cross => {
-                    if do_user_move(&mut playing_state.gameboard) {
-                        playing_state.player_turn = Player::Circle;
-                    }
-                    true
-                },
-                Player::Circle => {
-                    playing_state.player_turn = Player::Cross;
-                    do_ai_move(&mut playing_state.gameboard)
-                }
-            };
+            let (player_move, this_player, next_player) =
+                match playing_state.player_turn {
+                    Player::Cross => (get_user_move(), Player::Cross, Player::Circle),
+                    Player::Circle => (get_ai_move(&playing_state.gameboard), Player::Circle, Player::Cross)
+                };
+
+            if apply_move(&mut playing_state.gameboard, player_move, this_player) {
+                playing_state.player_turn = next_player
+            }
 
             if let Some(game_over_state) = game_is_over(&playing_state.gameboard) {
                 *gamestate = GameState::GameOver(game_over_state);

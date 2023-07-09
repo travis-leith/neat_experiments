@@ -19,7 +19,7 @@ pub struct GameBoard {
 }
 
 #[derive(Copy, Clone)]
-pub enum UserMove {
+pub enum PlayerMove {
     TopLft,
     TopMid,
     TopRgt,
@@ -62,7 +62,7 @@ pub fn empty_game_board() -> GameBoard {
     }
 }
 
-pub fn apply_move(gameboard: &mut GameBoard, user_move: UserMove, player: Player) -> bool {
+pub fn apply_move(gameboard: &mut GameBoard, player_move: PlayerMove, player: Player) -> bool {
     fn check_assign(cell: &mut Cell, val: Player) -> bool {
         if cell.0 == None {
             *cell = Cell(Some(val)); //TODO: can a closure be used to eliminate the val param?
@@ -71,16 +71,16 @@ pub fn apply_move(gameboard: &mut GameBoard, user_move: UserMove, player: Player
             false
         }
     } 
-    match user_move {
-        UserMove::TopLft => check_assign(&mut gameboard.top_lft, player),
-        UserMove::TopMid => check_assign(&mut gameboard.top_mid, player),
-        UserMove::TopRgt => check_assign(&mut gameboard.top_rgt, player),
-        UserMove::MidLft => check_assign(&mut gameboard.mid_lft, player),
-        UserMove::MidMid => check_assign(&mut gameboard.mid_mid, player),
-        UserMove::MidRgt => check_assign(&mut gameboard.mid_rgt, player),
-        UserMove::BotLft => check_assign(&mut gameboard.bot_lft, player),
-        UserMove::BotMid => check_assign(&mut gameboard.bot_mid, player),
-        UserMove::BotRgt => check_assign(&mut gameboard.bot_rgt, player)
+    match player_move {
+        PlayerMove::TopLft => check_assign(&mut gameboard.top_lft, player),
+        PlayerMove::TopMid => check_assign(&mut gameboard.top_mid, player),
+        PlayerMove::TopRgt => check_assign(&mut gameboard.top_rgt, player),
+        PlayerMove::MidLft => check_assign(&mut gameboard.mid_lft, player),
+        PlayerMove::MidMid => check_assign(&mut gameboard.mid_mid, player),
+        PlayerMove::MidRgt => check_assign(&mut gameboard.mid_rgt, player),
+        PlayerMove::BotLft => check_assign(&mut gameboard.bot_lft, player),
+        PlayerMove::BotMid => check_assign(&mut gameboard.bot_mid, player),
+        PlayerMove::BotRgt => check_assign(&mut gameboard.bot_rgt, player)
     }
 }
 
@@ -126,7 +126,7 @@ fn game_is_won(gameboard: &GameBoard) -> Option<Player> {
 
 pub fn game_is_over(gameboard: &GameBoard) -> Option<GameOverState> {
     match game_is_won(gameboard){
-        Some(user_won) => Some(GameOverState::Won(user_won)),
+        Some(player) => Some(GameOverState::Won(player)),
         None => {
             if game_is_tied(gameboard) {
                 Some(GameOverState::Tied)
