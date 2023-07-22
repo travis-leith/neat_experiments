@@ -44,8 +44,7 @@ pub enum GameOverState {
 pub enum GameState {
     Starting,
     Playing(PlayingGameState),
-    GameOver(GameOverState),
-    Exiting
+    GameOver(GameOverState)
 }
 
 pub fn empty_game_board() -> GameBoard {
@@ -63,24 +62,52 @@ pub fn empty_game_board() -> GameBoard {
 }
 
 pub fn apply_move(gameboard: &mut GameBoard, player_move: PlayerMove, player: Player) -> bool {
-    fn check_assign(cell: &mut Cell, val: Player) -> bool {
+    let check_assign = |cell: &mut Cell| {
         if cell.0 == None {
-            *cell = Cell(Some(val)); //TODO: can a closure be used to eliminate the val param?
+            *cell = Cell(Some(player));
             true
         } else {
             false
         }
-    } 
+    };
     match player_move {
-        PlayerMove::TopLft => check_assign(&mut gameboard.top_lft, player),
-        PlayerMove::TopMid => check_assign(&mut gameboard.top_mid, player),
-        PlayerMove::TopRgt => check_assign(&mut gameboard.top_rgt, player),
-        PlayerMove::MidLft => check_assign(&mut gameboard.mid_lft, player),
-        PlayerMove::MidMid => check_assign(&mut gameboard.mid_mid, player),
-        PlayerMove::MidRgt => check_assign(&mut gameboard.mid_rgt, player),
-        PlayerMove::BotLft => check_assign(&mut gameboard.bot_lft, player),
-        PlayerMove::BotMid => check_assign(&mut gameboard.bot_mid, player),
-        PlayerMove::BotRgt => check_assign(&mut gameboard.bot_rgt, player)
+        PlayerMove::TopLft => check_assign(&mut gameboard.top_lft),
+        PlayerMove::TopMid => check_assign(&mut gameboard.top_mid),
+        PlayerMove::TopRgt => check_assign(&mut gameboard.top_rgt),
+        PlayerMove::MidLft => check_assign(&mut gameboard.mid_lft),
+        PlayerMove::MidMid => check_assign(&mut gameboard.mid_mid),
+        PlayerMove::MidRgt => check_assign(&mut gameboard.mid_rgt),
+        PlayerMove::BotLft => check_assign(&mut gameboard.bot_lft),
+        PlayerMove::BotMid => check_assign(&mut gameboard.bot_mid),
+        PlayerMove::BotRgt => check_assign(&mut gameboard.bot_rgt)
+    }
+}
+
+pub fn transition_gamestate(
+    gamestate: &mut GameState, 
+    start_game: fn() -> GameState, 
+    cross_move: fn(&GameBoard) -> PlayerMove,
+    circle_move: fn(&GameBoard) -> PlayerMove) {
+    match gamestate {
+        GameState::Starting => {
+                *gamestate = start_game()
+        },
+        GameState::Playing(playing_state) => {
+            let (player_move, this_player, next_player) =
+                match playing_state.player_turn {
+                    Player::Cross => (cross_move(&playing_state.gameboard), Player::Cross, Player::Circle),
+                    Player::Circle => (circle_move(&playing_state.gameboard), Player::Circle, Player::Cross)
+                };
+
+            if apply_move(&mut playing_state.gameboard, player_move, this_player) {
+                playing_state.player_turn = next_player
+            }
+
+            if let Some(game_over_state) = game_is_over(&playing_state.gameboard) {
+                *gamestate = GameState::GameOver(game_over_state);
+            }
+        },
+        GameState::GameOver(_) => ()
     }
 }
 

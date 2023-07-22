@@ -101,7 +101,7 @@ fn maybe_get_user_move() -> Option<PlayerMove> {
     string_to_player_move(line1)
 }
 
-fn get_user_move() -> PlayerMove {
+fn get_user_move(_: &GameBoard) -> PlayerMove {
     let f = || maybe_get_user_move();
     get_valid_input_from_user(f)
 }
@@ -119,37 +119,6 @@ fn end_game(game_over_state: &GameOverState) {
     }
 }
 
-fn transition_gamestate(gamestate: &mut GameState) {
-    match gamestate {
-        GameState::Starting => {
-                *gamestate = start_game()
-        },
-        GameState::Playing(playing_state) => {
-            let (player_move, this_player, next_player) =
-                match playing_state.player_turn {
-                    Player::Cross => (get_user_move(), Player::Cross, Player::Circle),
-                    Player::Circle => (get_ai_move(&playing_state.gameboard), Player::Circle, Player::Cross)
-                };
-
-            if apply_move(&mut playing_state.gameboard, player_move, this_player) {
-                playing_state.player_turn = next_player
-            }
-
-            if let Some(game_over_state) = game_is_over(&playing_state.gameboard) {
-                *gamestate = GameState::GameOver(game_over_state);
-            }
-        },
-        GameState::GameOver(_) => {
-            if ask_user_for_new_game() {
-                *gamestate = GameState::Starting
-            } else {
-                *gamestate = GameState::Exiting
-            }
-        },
-        GameState::Exiting => ()
-    }
-}
-
 fn clear_screen() {
     print!("{}[2J", 27 as char);
 }
@@ -162,25 +131,32 @@ fn display_game(gamestate: &GameState) {
             let s = board_to_string(&playing_state.gameboard);
             println!("{s}");
         },
-        GameState::GameOver(game_over_state) => end_game(&game_over_state),
-        GameState::Exiting => ()
+        GameState::GameOver(game_over_state) => end_game(&game_over_state)
     }
 }
 
 impl GameState {
     fn not_exiting(&self) -> bool {
         match &self {
-            GameState::Exiting => false,
+            GameState::GameOver(_) => false,
             _ => true
         }
     }
 }
-pub fn game_loop() {
+fn inner_game_loop() {
     let mut gamestate = GameState::Starting;
 
     display_game(&gamestate);
     while gamestate.not_exiting() {
-        transition_gamestate(&mut gamestate);
+        transition_gamestate(&mut gamestate, start_game, get_user_move, get_ai_move);
         display_game(&gamestate);
+    }
+}
+
+pub fn game_loop() {
+    let mut play_a_game = true;
+    while play_a_game {
+        inner_game_loop();
+        play_a_game = ask_user_for_new_game()
     }
 }
