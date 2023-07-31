@@ -1,4 +1,5 @@
-use std::iter;
+// use std::iter;
+use tailcall::tailcall;
 
 pub struct Connection {
     in_node_id: usize,
@@ -15,6 +16,7 @@ pub struct Connection {
 //     Output
 // }
 
+//TODO change Genome to Network
 pub struct Genome {
     // genes: Vec<ConnectionGene>,
     n_sensor_nodes: usize,
@@ -55,7 +57,7 @@ fn print_genome(genome: &Genome) {
     }
 }
 
-fn activation_pulse(genome: &mut Genome) -> bool {
+fn activation_pulse(mut genome: Genome) -> (Genome, bool) {
     
     for (node_index_offset, input_connections) in genome.input_connections.iter().enumerate() {
         let node_index = node_index_offset + genome.n_sensor_nodes;
@@ -90,28 +92,28 @@ fn activation_pulse(genome: &mut Genome) -> bool {
         }
     }
 
-    all_active
+    (genome, all_active)
 }
 
 //TODO: add validate genome function and associated tests
 
-pub fn activate(genome: &mut Genome) {
-    let mut iteration_count = 0;
-    loop {
-        // println!("\n\niteration_count: {iteration_count}");
-        iteration_count += 1;
-        let all_activated = activation_pulse(genome);
-
-        // if debug {
-        //     print_genome(&genome);
-        // }
-
-        if (all_activated || iteration_count > 20) && iteration_count > 0 {
-            break;
+pub fn activate(genome: Genome) -> Genome {
+    #[tailcall]
+    fn activate_inner(genome: Genome, remaining_iterations: usize) -> Genome {
+        if remaining_iterations == 0 {
+            panic!("Too many iterations :(")
+        } else {
+            let (new_genome, all_activated) = activation_pulse(genome);
+            if all_activated {
+                new_genome
+            } else {
+                activate_inner(new_genome, remaining_iterations - 1)
+            }
         }
-        
     }
+    activate_inner(genome, 20)        
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -149,9 +151,9 @@ mod tests {
             active_sums: vec![0., 0., 0., 0., 0., 0.],
             node_values: vec![0.5, -0.2, 0., 0., 0., 0.] //inputs are initialized with their values, other nodes values are initialized with zero
         };
-        activate(&mut genome);
-        assert_approx_eq!(genome.node_values[4], 0.184);
-        assert_approx_eq!(genome.node_values[5], 0.);
+        let new_genome = activate(genome);
+        assert_approx_eq!(new_genome.node_values[4], 0.184);
+        assert_approx_eq!(new_genome.node_values[5], 0.);
     }
 
     #[test]
@@ -177,8 +179,8 @@ mod tests {
             active_sums: vec![0., 0., 0., 0., 0., 0.],
             node_values: vec![-0.9, 0.6, 0., 0., 0., 0.] //inputs are initialized with their values, other nodes values are initialized with zero
         };
-        activate(&mut genome);
-        assert_approx_eq!(genome.node_values[4], 0.024);
-        assert_approx_eq!(genome.node_values[5], 0.0216);
+        let new_genome = activate(genome);
+        assert_approx_eq!(new_genome.node_values[4], 0.024);
+        assert_approx_eq!(new_genome.node_values[5], 0.0216);
     }
 }
