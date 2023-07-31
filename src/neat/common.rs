@@ -4,6 +4,7 @@ pub struct Connection {
     in_node_id: usize,
     out_node_id: usize,
     weight: f64,
+    innovation_num: usize
     // enabled: bool,
     // innovation_num: usize
 }
@@ -117,24 +118,23 @@ mod tests {
     use super::*;
     use assert_approx_eq::assert_approx_eq;
 
-    fn make_connection(in_id: usize, out_id: usize, weight: f64) -> Connection{
+    fn make_connection(in_id: usize, out_id: usize, weight: f64, innov_num: usize) -> Connection{
         Connection {
             in_node_id: in_id,
             out_node_id: out_id,
-            weight: weight
+            weight: weight,
+            innovation_num: innov_num
         }
     }
 
-    
-
     #[test]
     fn feed_formward() {
-        let conn_0_to_2 = make_connection(0, 2, -0.1);
-        let conn_0_to_3 = make_connection(0, 3, 0.6);
-        let conn_1_to_3 = make_connection(1, 3, -0.8);
-        let conn_2_to_5 = make_connection(2, 5, 0.6);
-        let conn_3_to_4 = make_connection(3, 4, 0.4);
-        let conn_3_to_5 = make_connection(3, 5, -0.9);
+        let conn_0_to_2 = make_connection(0, 2, -0.1, 0);
+        let conn_0_to_3 = make_connection(0, 3, 0.6, 1);
+        let conn_1_to_3 = make_connection(1, 3, -0.8, 2);
+        let conn_2_to_5 = make_connection(2, 5, 0.6, 3);
+        let conn_3_to_4 = make_connection(3, 4, 0.4, 4);
+        let conn_3_to_5 = make_connection(3, 5, -0.9, 5);
 
         let inputs_2 = vec![conn_0_to_2];
         let inputs_3 = vec![conn_0_to_3, conn_1_to_3];
@@ -156,13 +156,13 @@ mod tests {
 
     #[test]
     fn recurrent() {
-        let conn_0_to_2 = make_connection(0, 2, -0.8);
-        let conn_1_to_2 = make_connection(1, 2, -0.8);
-        let conn_2_to_4 = make_connection(2, 4, 0.1);
-        let conn_4_to_3 = make_connection(4, 3, 0.5);
-        let conn_3_to_2 = make_connection(3, 2, -0.1);
-        let conn_3_to_5 = make_connection(3, 5, -0.4);
-        let conn_4_to_5 = make_connection(4, 5, 0.9);
+        let conn_0_to_2 = make_connection(0, 2, -0.8, 0);
+        let conn_1_to_2 = make_connection(1, 2, -0.8, 1);
+        let conn_2_to_4 = make_connection(2, 4, 0.1, 2);
+        let conn_4_to_3 = make_connection(4, 3, 0.5, 3);
+        let conn_3_to_2 = make_connection(3, 2, -0.1, 4);
+        let conn_3_to_5 = make_connection(3, 5, -0.4, 5);
+        let conn_4_to_5 = make_connection(4, 5, 0.9, 6);
 
         let inputs_2 = vec![conn_0_to_2, conn_1_to_2, conn_3_to_2];
         let inputs_3 = vec![conn_4_to_3];
