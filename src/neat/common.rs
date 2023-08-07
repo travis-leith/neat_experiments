@@ -1,6 +1,6 @@
 use tailcall::tailcall;
 use rand::distributions::{Distribution, Uniform};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct Connection {
     in_node_id: usize,
@@ -21,7 +21,6 @@ pub struct Network {
     n_output_nodes: usize,
     n_hidden_nodes: usize,
     genome: Vec<Connection>,
-    genome_size: usize,
     input_connections_map: Vec<Vec<usize>>,
     nodes_with_active_inputs: Vec<bool>,
     active_nodes: Vec<bool>,
@@ -34,6 +33,16 @@ impl Network {
         self.n_hidden_nodes + self.n_output_nodes + self.n_sensor_nodes
     }
 
+    fn set_phenotype(mut self) -> Network {
+        let n_activateable = self.n_output_nodes + self.n_hidden_nodes;
+        let node_offset = self.n_sensor_nodes;
+        self.input_connections_map = (0..n_activateable).map(|_| Vec::new()).collect();
+        for (conn_index, conn) in self.genome.iter().enumerate() {
+            self.input_connections_map[conn.out_node_id - node_offset].push(conn_index)
+        }
+        self
+    }
+
     fn empty(n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
         let mut active_nodes = vec![true; n_sensor_nodes];
         active_nodes.append(&mut vec![false; n_output_nodes]);
@@ -42,7 +51,6 @@ impl Network {
             n_output_nodes,
             n_hidden_nodes: 0,
             genome: Vec::new(),
-            genome_size: 0,
             input_connections_map: Vec::new(),
             active_nodes,
             nodes_with_active_inputs: vec![false; n_output_nodes], //sensors do not have inputs so no need to have values for them here 
@@ -52,10 +60,32 @@ impl Network {
     }
 
     fn create_from_genome(n_sensor_nodes: usize, n_output_nodes: usize, genome: Vec<Connection>) -> Network {
-        //need to determine how many input nodes
+        let hidden_index_start = n_sensor_nodes + n_output_nodes;
+        let mut hidden_nodes = HashSet::new();
+        for conn in genome.iter() {
+            if conn.in_node_id >= hidden_index_start {hidden_nodes.insert(conn.in_node_id);}
+            if conn.out_node_id >= hidden_index_start {hidden_nodes.insert(conn.out_node_id);}
+        }
+        let n_hidden_nodes = hidden_nodes.len();
+        let n_non_sensor = n_output_nodes + n_hidden_nodes;
+        let n_total_nodes = n_non_sensor + n_sensor_nodes;
+        let mut active_nodes = vec![true; n_sensor_nodes];
+        active_nodes.append(&mut vec![false; n_non_sensor]);
+        Network {
+            n_sensor_nodes,
+            n_output_nodes,
+            n_hidden_nodes,
+            genome,
+            input_connections_map: Vec::new(),
+            active_nodes,
+            nodes_with_active_inputs: vec![false; n_non_sensor],
+            active_sums: vec![0.; n_non_sensor],
+            node_values: vec![0.; n_total_nodes]
+        }
+
     }
 
-    fn init_from_starting_innovation_map(n_sensor_nodes: usize, n_output_nodes: usize, innovation_map: HashMap<(usize, usize), usize>) -> Network {
+    fn init_from_starting_innovation_map(n_sensor_nodes: usize, n_output_nodes: usize, innovation_map: &HashMap<(usize, usize), usize>) -> Network {
         let mut res = Network::empty(n_sensor_nodes, n_output_nodes);
         let between = Uniform::from(-1.0..1.0);
         let mut rng = rand::thread_rng();
@@ -63,7 +93,6 @@ impl Network {
             let weight = between.sample(&mut rng);
             res.genome.push(Connection { in_node_id: *in_node_id, out_node_id: *out_node_id, weight, innovation_num: *innovation_num, enabled: true });
         }
-        res.genome_size = innovation_map.len();
         res.set_phenotype()
     }
 
@@ -93,15 +122,7 @@ impl Network {
         activate_inner(self, 20)        
     }
 
-    fn set_phenotype(mut self) -> Network {
-        let n_activateable = self.n_output_nodes + self.n_hidden_nodes;
-        let node_offset = self.n_sensor_nodes;
-        self.input_connections_map = (0..n_activateable).map(|_| Vec::new()).collect();
-        for (conn_index, conn) in self.genome.iter().enumerate() {
-            self.input_connections_map[conn.out_node_id - node_offset].push(conn_index)
-        }
-        self
-    }
+    
 }
 
 pub struct Organism {
@@ -112,10 +133,10 @@ pub struct Organism {
 fn cross_over(organism_1: &Organism, organism_2: &Organism) -> Organism {
     let mut gene_index_1 = 0;
     let mut gene_index_2 = 0;
-    let genome_size_1 = organism_1.network.genome_size;
-    let genome_size_2 = organism_2.network.genome_size;
+    let genome_size_1 = organism_1.network.genome.len();
+    let genome_size_2 = organism_2.network.genome.len();
     let max_genome_size = std::cmp::max(genome_size_2, genome_size_1);
-    let mut gene_pair_index = 0;
+    // let mut gene_pair_index = 0;
     let mut gene_pairs = Vec::with_capacity(max_genome_size);
 
     while gene_index_1 < genome_size_1 || gene_index_2 < genome_size_2 {
@@ -123,29 +144,39 @@ fn cross_over(organism_1: &Organism, organism_2: &Organism) -> Organism {
             if gene_index_2 < genome_size_2 {
                 //still processing org_1 and org_2
                 if organism_1.network.genome[gene_index_1].innovation_num == organism_2.network.genome[gene_index_2].innovation_num {
-                    gene_pairs[gene_pair_index] = (Some(&organism_1.network.genome[gene_index_1]), Some(&organism_2.network.genome[gene_index_2]));
-                    gene_pair_index+=1;
+                    let gene_pair = (Some(&organism_1.network.genome[gene_index_1]), Some(&organism_2.network.genome[gene_index_2]));
+                    gene_pairs.push(gene_pair);
+                    // gene_pairs[gene_pair_index] = 
+                    // gene_pair_index+=1;
                     gene_index_1+=1;
                     gene_index_2+=1;
                 } else if organism_1.network.genome[gene_index_1].innovation_num < organism_2.network.genome[gene_index_2].innovation_num {
-                    gene_pairs[gene_pair_index] = (Some(&organism_1.network.genome[gene_index_1]), None);
-                    gene_pair_index+=1;
+                    let gene_pair = (Some(&organism_1.network.genome[gene_index_1]), None);
+                    gene_pairs.push(gene_pair);
+                    // gene_pairs[gene_pair_index] = (Some(&organism_1.network.genome[gene_index_1]), None);
+                    // gene_pair_index+=1;
                     gene_index_1+=1;
                 } else {
-                    gene_pairs[gene_pair_index] = (None, Some(&organism_2.network.genome[gene_index_2]));
-                    gene_pair_index+=1;
+                    let gene_pair = (None, Some(&organism_2.network.genome[gene_index_2]));
+                    gene_pairs.push(gene_pair);
+                    // gene_pairs[gene_pair_index] = (None, Some(&organism_2.network.genome[gene_index_2]));
+                    // gene_pair_index+=1;
                     gene_index_2+=1;
                 }
             } else {
                 //still processing org_1 but finished with org_2
-                gene_pairs[gene_pair_index] = (Some(&organism_1.network.genome[gene_index_1]), None);
-                gene_pair_index+=1;
+                let gene_pair = (Some(&organism_1.network.genome[gene_index_1]), None);
+                gene_pairs.push(gene_pair);
+                // gene_pairs[gene_pair_index] = (Some(&organism_1.network.genome[gene_index_1]), None);
+                // gene_pair_index+=1;
                 gene_index_1+=1;
             }
         } else if gene_index_2 < genome_size_2 {
             //finished processing org_1 but still busy with org_2
-            gene_pairs[gene_pair_index] = (None, Some(&organism_2.network.genome[gene_index_2]));
-            gene_pair_index+=1;
+            let gene_pair = (None, Some(&organism_2.network.genome[gene_index_2]));
+            gene_pairs.push(gene_pair);
+            // gene_pairs[gene_pair_index] = (None, Some(&organism_2.network.genome[gene_index_2]));
+            // gene_pair_index+=1;
             gene_index_2+=1;
         } else {
             //if we are finished with org_1 and org_2, why are we still here?
@@ -170,12 +201,11 @@ fn cross_over(organism_1: &Organism, organism_2: &Organism) -> Organism {
             (None, None) => unreachable!("Cross over did not complete when expected")
         }
     }).flatten().collect();
-    let res = Organism { 
-        network: Network::empty(1,1),
+    let network = Network::create_from_genome(organism_1.network.n_sensor_nodes, organism_2.network.n_output_nodes, new_genome);
+    Organism { 
+        network,
         fitness: 0
-     };
-    res
-    // organism_1
+     }
 }
 
 fn relu(x: f64) -> f64 {
@@ -260,6 +290,7 @@ fn add_node(mut network: Network, existing_conn_index: usize, global_innovation:
 mod tests {
     use super::*;
     use assert_approx_eq::assert_approx_eq;
+    use itertools::Itertools;
 
     #[test]
     fn network_creation() {
@@ -383,5 +414,35 @@ mod tests {
         assert_approx_eq!(new_network.node_values[2], 0.0216);
     }
 
+    #[test]
+    fn cross_over_works() {
+        //inspired by the crossover example from the original paper by K Stanley
+        let innovation_map:HashMap<(usize, usize), usize> = vec![((0,3),0), ((1,3),1), ((2,3),2)].into_iter().collect();
 
+        let organism_1 = {
+            let network = Network::init_from_starting_innovation_map(3, 1, &innovation_map);
+            let (network, _) = add_node_by_in_out(network, 1, 3, 0.5, 3);
+            let (network, _) = add_connection(network, 0, 4, 0.5, 7);
+            Organism{
+                network,
+                fitness: 3
+            }
+        };
+
+        let organism_2 = {
+            let network = Network::init_from_starting_innovation_map(3, 1, &innovation_map);
+            let (network, _) = add_node_by_in_out(network, 1, 3, 0.5, 3);
+            let (network, _) = add_node_by_in_out(network, 4, 3, 0.5, 5);
+            let (network, _) = add_connection(network, 2, 4, 0.5, 8);
+            let (network, _) = add_connection(network, 0, 5, 0.5, 9);
+
+            Organism{
+                network,
+                fitness: 4
+            }
+        };
+
+        let organism_child = cross_over(&organism_1, &organism_2);
+        assert_eq!(organism_child.network.genome.len(), 9)
+    }
 }
