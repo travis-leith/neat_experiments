@@ -130,13 +130,12 @@ pub struct Organism {
     fitness: usize // consider changing to generic type
 }
 
-fn cross_over(organism_1: &Organism, organism_2: &Organism) -> Organism {
+fn align_genes<'a>(organism_1: &'a Organism, organism_2: &'a Organism) -> Vec<(Option<&'a Connection>, Option<&'a Connection>)> {
     let mut gene_index_1 = 0;
     let mut gene_index_2 = 0;
     let genome_size_1 = organism_1.network.genome.len();
     let genome_size_2 = organism_2.network.genome.len();
     let max_genome_size = std::cmp::max(genome_size_2, genome_size_1);
-    // let mut gene_pair_index = 0;
     let mut gene_pairs = Vec::with_capacity(max_genome_size);
 
     while gene_index_1 < genome_size_1 || gene_index_2 < genome_size_2 {
@@ -183,6 +182,11 @@ fn cross_over(organism_1: &Organism, organism_2: &Organism) -> Organism {
             unreachable!("Cross over did not complete when expected")
         }
     }
+    gene_pairs
+}
+
+fn cross_over(gene_pairs: &Vec<(Option<&Connection>, Option<&Connection>)>, fitness_1: usize, fitness2: usize, n_sensors: usize, n_output: usize) -> Organism {
+    // let gene_pairs: Vec<(Option<&Connection>, Option<&Connection>)> = align_genes(organism_1, organism_2);
     let between = Uniform::from(0.0..1.0);
     let mut rng = rand::thread_rng();
     let new_genome : Vec<Connection> = gene_pairs.into_iter().map(|pair| {
@@ -190,22 +194,69 @@ fn cross_over(organism_1: &Organism, organism_2: &Organism) -> Organism {
         match pair {
             (Some(conn1), Some(_)) if r > 0.5 => Some(conn1.copy_conn()),
             (Some(_), Some(conn2)) => Some(conn2.copy_conn()),
-            (Some(conn1), None) if organism_1.fitness > organism_2.fitness => Some(conn1.copy_conn()),
-            (Some(_), None) if organism_1.fitness < organism_2.fitness => None,
+            (Some(conn1), None) if fitness_1 > fitness2 => Some(conn1.copy_conn()),
+            (Some(_), None) if fitness_1 < fitness2 => None,
             (Some(conn1), None) if r > 0.5 => Some(conn1.copy_conn()),
             (Some(_), None) => None,
-            (None, Some(_)) if organism_1.fitness > organism_2.fitness => None,
-            (None, Some(conn2)) if organism_1.fitness < organism_2.fitness => Some(conn2.copy_conn()),
+            (None, Some(_)) if fitness_1 > fitness2 => None,
+            (None, Some(conn2)) if fitness_1 < fitness2 => Some(conn2.copy_conn()),
             (None, Some(_)) if r > 0.5 => None,
             (None, Some(conn2)) => Some(conn2.copy_conn()),
             (None, None) => unreachable!("Cross over did not complete when expected")
         }
     }).flatten().collect();
-    let network = Network::create_from_genome(organism_1.network.n_sensor_nodes, organism_2.network.n_output_nodes, new_genome);
+    let network = Network::create_from_genome(n_sensors, n_output, new_genome);
     Organism { 
         network,
         fitness: 0
      }
+}
+
+fn genome_distance(gene_pairs: &Vec<(Option<&Connection>, Option<&Connection>)>, excess_coef: f64, disjoint_coef: f64, weight_diff_coef: f64) -> f64 {
+    let mut total_weight_diff = 0.;
+    let mut first_is_excess = false;
+    let mut excess_count = 0;
+    let mut disjoint_count = 0;
+    let mut n1 = 0;
+    let mut n2 = 0;
+
+    for gene_pair in gene_pairs {
+        match gene_pair {
+            (Some(conn1), Some(conn2)) => {
+                n1 += 1;
+                n2 += 1;
+                first_is_excess = false;
+                total_weight_diff = total_weight_diff + (conn1.weight - conn2.weight).abs();
+            },
+            (Some(_), None) if first_is_excess => {
+                n1 += 1;
+                excess_count += 1;
+            },
+            (Some(_), None) => {
+                n1 += 1;
+                first_is_excess = true;
+                disjoint_count = disjoint_count + excess_count;
+                excess_count = 1;
+            },
+            (None, Some(_)) if first_is_excess => {
+                n2 += 1;
+                first_is_excess = false;
+                disjoint_count = disjoint_count + excess_count;
+                excess_count = 1;
+            },
+            (None, Some(_)) => {
+                n2 += 1;
+                excess_count += 1;
+            },
+            (None, None) => unreachable!("Unexpected gene pairing")
+        }
+    }
+
+    let n = std::cmp::max(n1, n2) as f64;
+    let excess_term = excess_coef * (excess_count as f64) / n;
+    let disjoint_term = disjoint_coef * (disjoint_count as f64) / n;
+    let weight_term = weight_diff_coef * total_weight_diff / n;
+    excess_term + disjoint_term + weight_term
 }
 
 fn relu(x: f64) -> f64 {
@@ -290,7 +341,6 @@ fn add_node(mut network: Network, existing_conn_index: usize, global_innovation:
 mod tests {
     use super::*;
     use assert_approx_eq::assert_approx_eq;
-    use itertools::Itertools;
 
     #[test]
     fn network_creation() {
@@ -414,8 +464,7 @@ mod tests {
         assert_approx_eq!(new_network.node_values[2], 0.0216);
     }
 
-    #[test]
-    fn cross_over_works() {
+    fn testing_organism_pair() -> (Organism, Organism) {
         //inspired by the crossover example from the original paper by K Stanley
         let innovation_map:HashMap<(usize, usize), usize> = vec![((0,3),0), ((1,3),1), ((2,3),2)].into_iter().collect();
 
@@ -441,8 +490,21 @@ mod tests {
                 fitness: 4
             }
         };
-
-        let organism_child = cross_over(&organism_1, &organism_2);
+        (organism_1, organism_2)
+    }
+    #[test]
+    fn cross_over_works() {
+        let (organism_1, organism_2) = testing_organism_pair();
+        let gene_pairs: Vec<(Option<&Connection>, Option<&Connection>)> = align_genes(&organism_1, &organism_2);
+        let organism_child = cross_over(&gene_pairs, organism_1.fitness, organism_2.fitness, 3, 1);
         assert_eq!(organism_child.network.genome.len(), 9)
+    }
+
+    #[test]
+    fn geneic_distance_works() {
+        let (organism_1, organism_2) = testing_organism_pair();
+        let gene_pairs: Vec<(Option<&Connection>, Option<&Connection>)> = align_genes(&organism_1, &organism_2);
+        assert_approx_eq!(genome_distance(&gene_pairs, 1., 0., 0.), 2. / 9.);
+        assert_approx_eq!(genome_distance(&gene_pairs, 0., 1., 0.), 3. / 9.);
     }
 }
