@@ -2,11 +2,24 @@ use tailcall::tailcall;
 use rand::distributions::{Distribution, Uniform};
 use std::collections::{HashMap, HashSet};
 
-pub struct Connection {
-    in_node_id: usize,
-    out_node_id: usize,
+#[derive(Eq, PartialEq, Hash, PartialOrd, Copy, Clone)]
+pub struct InputNodeId(usize);
+
+#[derive(Eq, PartialEq, Hash, PartialOrd, Copy, Clone)]
+pub struct OutputNodeId(usize);
+
+#[derive(PartialEq, PartialOrd, Copy, Clone)]
+pub struct InnovationNumber(usize);
+impl InnovationNumber {
+    fn inc(self) -> InnovationNumber {
+        InnovationNumber(self.0 + 1)
+    }
+}
+struct Connection {
+    in_node_id: InputNodeId,
+    out_node_id: OutputNodeId,
     weight: f64,
-    innovation_num: usize,
+    innovation_num: InnovationNumber,
     enabled: bool
 }
 
@@ -16,7 +29,7 @@ impl Connection {
     }
 }
 
-pub struct Network {
+struct Network {
     n_sensor_nodes: usize,
     n_output_nodes: usize,
     n_hidden_nodes: usize,
@@ -38,7 +51,7 @@ impl Network {
         let node_offset = self.n_sensor_nodes;
         self.input_connections_map = (0..n_activateable).map(|_| Vec::new()).collect();
         for (conn_index, conn) in self.genome.iter().enumerate() {
-            self.input_connections_map[conn.out_node_id - node_offset].push(conn_index)
+            self.input_connections_map[conn.out_node_id.0 - node_offset].push(conn_index)
         }
         self
     }
@@ -63,8 +76,8 @@ impl Network {
         let hidden_index_start = n_sensor_nodes + n_output_nodes;
         let mut hidden_nodes = HashSet::new();
         for conn in genome.iter() {
-            if conn.in_node_id >= hidden_index_start {hidden_nodes.insert(conn.in_node_id);}
-            if conn.out_node_id >= hidden_index_start {hidden_nodes.insert(conn.out_node_id);}
+            if conn.in_node_id.0 >= hidden_index_start {hidden_nodes.insert(conn.in_node_id.0);}
+            if conn.out_node_id.0 >= hidden_index_start {hidden_nodes.insert(conn.out_node_id.0);}
         }
         let n_hidden_nodes = hidden_nodes.len();
         let n_non_sensor = n_output_nodes + n_hidden_nodes;
@@ -85,13 +98,29 @@ impl Network {
 
     }
 
-    fn init_from_starting_innovation_map(n_sensor_nodes: usize, n_output_nodes: usize, innovation_map: &HashMap<(usize, usize), usize>) -> Network {
+    // fn init_from_starting_innovation_map(n_sensor_nodes: usize, n_output_nodes: usize, innovation_map: &HashMap<(InputNodeId, OutputNodeId), InnovationNumber>) -> Network {
+    //     let mut res = Network::empty(n_sensor_nodes, n_output_nodes);
+    //     let between = Uniform::from(-1.0..1.0);
+    //     let mut rng = rand::thread_rng();
+    //     for ((in_node_id, out_node_id), innovation_num) in innovation_map.iter() {
+    //         let weight = between.sample(&mut rng);
+    //         res.genome.push(Connection { in_node_id: *in_node_id, out_node_id: *out_node_id, weight, innovation_num: *innovation_num, enabled: true });
+    //     }
+    //     res.set_phenotype()
+    // }
+
+    fn init(n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
         let mut res = Network::empty(n_sensor_nodes, n_output_nodes);
         let between = Uniform::from(-1.0..1.0);
         let mut rng = rand::thread_rng();
-        for ((in_node_id, out_node_id), innovation_num) in innovation_map.iter() {
-            let weight = between.sample(&mut rng);
-            res.genome.push(Connection { in_node_id: *in_node_id, out_node_id: *out_node_id, weight, innovation_num: *innovation_num, enabled: true });
+
+        for in_id in 0..n_sensor_nodes {
+            for out_id in n_sensor_nodes..(n_sensor_nodes + n_output_nodes) {
+                let weight = between.sample(&mut rng);
+                let innovation_number = in_id * n_output_nodes + out_id - n_sensor_nodes;
+                let conn = Connection { in_node_id: InputNodeId(in_id), out_node_id: OutputNodeId(out_id), weight, innovation_num: InnovationNumber(innovation_number), enabled: true};
+                res.genome.push(conn);
+            }
         }
         res.set_phenotype()
     }
@@ -108,6 +137,7 @@ impl Network {
     
         #[tailcall]
         fn activate_inner(network: Network, remaining_iterations: usize) -> Network {
+            println!("remaining iters: {remaining_iterations}");
             if remaining_iterations == 0 {
                 panic!("Too many iterations :(")
             } else {
@@ -122,12 +152,30 @@ impl Network {
         activate_inner(self, 20)        
     }
 
-    
+    fn input_is_active(&self, input_node: InputNodeId) -> bool {
+        self.active_nodes[input_node.0]
+    }
+
+    fn input_value(&self, input_node: InputNodeId) -> f64 {
+        self.node_values[input_node.0]
+    }
 }
 
 pub struct Organism {
     network: Network,
     fitness: usize // consider changing to generic type
+}
+
+impl Organism {
+    pub fn init(n_sensor_nodes: usize, n_output_nodes: usize) -> Organism {
+        Organism { network: Network::init(n_sensor_nodes, n_output_nodes), fitness: 0 }
+    }
+
+    pub fn activate(mut self, sensor_values: Vec<f64>) -> Organism {
+        let network = self.network.activate(sensor_values);
+        self.network = network;
+        self
+    }
 }
 
 fn align_genes<'a>(organism_1: &'a Organism, organism_2: &'a Organism) -> Vec<(Option<&'a Connection>, Option<&'a Connection>)> {
@@ -270,16 +318,20 @@ fn relu(x: f64) -> f64 {
 fn activation_pulse(mut network: Network) -> (Network, bool) {
     
     for (node_index_offset, input_connections) in network.input_connections_map.iter().enumerate() {
-        let node_index = node_index_offset + network.n_sensor_nodes;
+        // let node_index = node_index_offset + network.n_sensor_nodes;
         network.nodes_with_active_inputs[node_index_offset] = false;
-
+        println!("node_index_offset is {node_index_offset}");
         network.active_sums[node_index_offset] = 0.;
         for conn_id in input_connections {
+            println!("conn_id: {conn_id}");
             let conn = &network.genome[*conn_id];
-            if network.active_nodes[conn.in_node_id] && conn.enabled {
+            // if network.active_nodes[conn.in_node_id] && conn.enabled {
+            if network.input_is_active(conn.in_node_id) && conn.enabled {
                 network.nodes_with_active_inputs[node_index_offset] = true;
-                let to_add = conn.weight * network.node_values[conn.in_node_id];
+                let to_add = conn.weight * network.input_value(conn.in_node_id);
                 network.active_sums[node_index_offset] += to_add;
+                let f = network.active_sums[node_index_offset];
+                println!("node_index_offset: {node_index_offset}; active_sum: {f}");
             }
         }
     }
@@ -288,6 +340,7 @@ fn activation_pulse(mut network: Network) -> (Network, bool) {
     for (node_index_offset, f) in &mut network.node_values[network.n_sensor_nodes ..].iter_mut().enumerate() {
         let node_index = node_index_offset + network.n_sensor_nodes;
         *f = relu(network.active_sums[node_index_offset]);
+        println!("node_index_offset: {node_index_offset}; f: {f}");
         if network.nodes_with_active_inputs[node_index_offset] {
             network.active_nodes[node_index] = true;
         } else {
@@ -298,24 +351,24 @@ fn activation_pulse(mut network: Network) -> (Network, bool) {
     (network, all_active)
 }
 
-fn add_connection(mut network: Network, in_id: usize, out_id: usize, weight: f64, global_innovation: usize) -> (Network, usize) {
-    if out_id < network.n_sensor_nodes {
+fn add_connection(mut network: Network, in_id: InputNodeId, out_id: OutputNodeId, weight: f64, global_innovation: InnovationNumber) -> (Network, InnovationNumber) {
+    if out_id.0 < network.n_sensor_nodes {
         panic!("Tried to add a connection that outputs to a sensor node")
     }
 
-    if in_id >= network.n_sensor_nodes && in_id < (network.n_sensor_nodes + network.n_output_nodes) {
+    if in_id.0 >= network.n_sensor_nodes && in_id.0 < (network.n_sensor_nodes + network.n_output_nodes) {
         panic!("Tried to add a connection that inputs from an output node")
     }
 
-    if out_id > network.n_total_nodes() {
-        panic!("Tried to add a connection with an output ({out_id}) that skips an available id ({})", network.n_total_nodes())
+    if out_id.0 > network.n_total_nodes() {
+        panic!("Tried to add a connection with an output ({}) that skips an available id ({})", out_id.0, network.n_total_nodes())
     }
 
     network.genome.push(Connection { in_node_id: in_id, out_node_id: out_id, weight, innovation_num: global_innovation, enabled: true });
-    (network, global_innovation + 1)
+    (network, global_innovation.inc())
 }
 
-fn add_node(mut network: Network, existing_conn_index: usize, global_innovation: usize) -> (Network, usize) {
+fn add_node(mut network: Network, existing_conn_index: usize, global_innovation: InnovationNumber) -> (Network, InnovationNumber) {
     
     if !network.genome[existing_conn_index].enabled {
         panic!("Tried to add a node to a disabled connection")
@@ -332,8 +385,8 @@ fn add_node(mut network: Network, existing_conn_index: usize, global_innovation:
     let conn_in_id = network.genome[existing_conn_index].in_node_id;
     let conn_out_id = network.genome[existing_conn_index].out_node_id;
     let conn_weight = network.genome[existing_conn_index].weight;
-    let (new_network, global_innovation) = add_connection(network, conn_in_id, new_node_id, 1., global_innovation);
-    add_connection(new_network, new_node_id, conn_out_id, conn_weight, global_innovation)
+    let (new_network, global_innovation) = add_connection(network, conn_in_id, OutputNodeId(new_node_id), 1., global_innovation);
+    add_connection(new_network, InputNodeId(new_node_id), conn_out_id, conn_weight, global_innovation)
 
 }
 
@@ -357,66 +410,70 @@ mod tests {
 
     }
 
+    fn add_connection_by_int(mut network: Network, in_id: usize, out_id: usize, weight: f64, global_innovation: usize) -> (Network, usize) {
+        let (net, inn) = add_connection(network, InputNodeId(in_id), OutputNodeId(out_id), weight, InnovationNumber(global_innovation));
+        (net, inn.0)
+    }
     #[test]
     #[should_panic(expected = "Tried to add a connection that outputs to a sensor node")]
     fn cannot_add_connection_out_to_sensor() {
         let network = Network::empty(2, 2);
-        let _ = add_connection(network, 1, 0, 0., 0);
+        let _ = add_connection_by_int(network, 1, 0, 0., 0);
     }
 
     #[test]
     #[should_panic(expected = "Tried to add a connection that inputs from an output node")]
     fn cannot_add_connection_in_from_output() {
         let network = Network::empty(2, 2);
-        let _ = add_connection(network, 2, 3, 0., 0);
+        let _ = add_connection_by_int(network, 2, 3, 0., 0);
     }
 
     #[test]
     #[should_panic(expected = "Tried to add a connection with an output (5) that skips an available id (4)")]
     fn cannot_add_connection_beyond_length() {
         let network = Network::empty(2, 2);
-        let _ = add_connection(network, 1, 5, 0., 0);
+        let _ = add_connection_by_int(network, 1, 5, 0., 0);
     }
 
     #[test]
     fn can_add_valid_connection(){
         let network = Network::empty(2, 2);
-        let (network, _) = add_connection(network, 1, 2, 0.5, 1);
+        let (network, _) = add_connection_by_int(network, 1, 2, 0.5, 1);
         let network = network.set_phenotype();
         assert_eq!(network.input_connections_map[0].len(), 1);
         let conn_index = network.input_connections_map[0][0];
-        assert_eq!(network.genome[conn_index].in_node_id, 1);
-        assert_eq!(network.genome[conn_index].innovation_num, 1);
+        assert_eq!(network.genome[conn_index].in_node_id.0, 1);
+        assert_eq!(network.genome[conn_index].innovation_num.0, 1);
     }
 
     #[test]
     fn can_add_valid_node(){
         let network = Network::empty(2, 2);
-        let (network, global_innvation) = add_connection(network, 1, 2, 0.5, 1);
-        let (network, global_innvation) = add_node(network, 0, global_innvation);
+        let (network, global_innvation) = add_connection_by_int(network, 1, 2, 0.5, 1);
+        let (network, global_innvation) = add_node(network, 0, InnovationNumber(global_innvation));
 
         assert_eq!(network.genome[0].enabled, false);
-        assert_eq!(network.genome[1].in_node_id, 1);
-        assert_eq!(network.genome[1].out_node_id, 4);
+        assert_eq!(network.genome[1].in_node_id.0, 1);
+        assert_eq!(network.genome[1].out_node_id.0, 4);
         assert_eq!(network.genome[1].weight, 1.);
-        assert_eq!(network.genome[2].in_node_id, 4);
-        assert_eq!(network.genome[2].out_node_id, 2);
+        assert_eq!(network.genome[2].in_node_id.0, 4);
+        assert_eq!(network.genome[2].out_node_id.0, 2);
         assert_eq!(network.genome[2].weight, 0.5);
     }
 
     fn add_node_by_in_out(network: Network, in_id: usize, out_id: usize, new_weight: f64, global_innovation: usize) -> (Network, usize) {
-        let conn_index = match network.genome.iter().enumerate().find(|(i,x)| x.in_node_id == in_id && x.out_node_id == out_id && x.enabled) {
+        let conn_index = match network.genome.iter().enumerate().find(|(i,x)| x.in_node_id.0 == in_id && x.out_node_id.0 == out_id && x.enabled) {
             Some((index, conn)) => index,
             None => panic!("Cannot add a node to a connection that does not exist")
         };
         let new_conn_index = network.genome.len();
-        let (mut new_network, global_innov) = add_node(network, conn_index, global_innovation);
+        let (mut new_network, global_innov) = add_node(network, conn_index, InnovationNumber(global_innovation));
         new_network.genome[new_conn_index].weight = new_weight;
-        (new_network, global_innov)
+        (new_network, global_innov.0)
     }
 
     fn diable_connection_by_in_out(mut network: Network, in_id: usize, out_id: usize) -> Network {
-        let conn_index = match network.genome.iter().enumerate().find(|(i,x)| x.in_node_id == in_id && x.out_node_id == out_id && x.enabled) {
+        let conn_index = match network.genome.iter().enumerate().find(|(i,x)| x.in_node_id.0 == in_id && x.out_node_id.0 == out_id && x.enabled) {
             Some((index, conn)) => index,
             None => panic!("Cannot add a node to a connection that does not exist")
         };
@@ -425,21 +482,24 @@ mod tests {
     }
 
     #[test]
-    fn feed_formward() {
+    fn feed_forward() {
         let network = Network::empty(2, 2);
         let global_innov = 0;
         //these connections will be disabled by adding nodes
-        let (network, global_innov) = add_connection(network, 0, 3, 0.6, global_innov);
-        let (network, global_innov) = add_connection(network, 1, 3, -0.9, global_innov);
+        let (network, global_innov) = add_connection_by_int(network, 0, 3, 0.6, global_innov);
+        let (network, global_innov) = add_connection_by_int(network, 1, 3, -0.9, global_innov);
 
         let (network, global_innov) = add_node_by_in_out(network, 0, 3, -0.1, global_innov);
         let (network, global_innov) = add_node_by_in_out(network, 1, 3, -0.8, global_innov);
-        let (network, global_innov) = add_connection(network, 0, 5, 0.6, global_innov);
-        let (network, global_innov) = add_connection(network, 5, 2, 0.4, global_innov);
+        let (network, global_innov) = add_connection_by_int(network, 0, 5, 0.6, global_innov);
+        let (network, global_innov) = add_connection_by_int(network, 5, 2, 0.4, global_innov);
 
         let network = network.set_phenotype();
+        let i = network.input_connections_map[0].len();
+        let j = network.input_connections_map[0][0];
+        println!("i: {i}; j: {j}");
         let new_network = network.activate(vec![0.5, -0.2]);
-        assert_approx_eq!(new_network.node_values[2], 0.184);
+        assert_approx_eq!(new_network.node_values[2], 0.584);
         assert_approx_eq!(new_network.node_values[3], 0.);
         assert_eq!(global_innov, 8);
     }
@@ -449,15 +509,15 @@ mod tests {
         let network = Network::empty(2, 1);
         let global_innov = 0;
 
-        let (network, global_innov) = add_connection(network, 1, 2, 0.9, global_innov);
+        let (network, global_innov) = add_connection_by_int(network, 1, 2, 0.9, global_innov);
         let (network, global_innov) = add_node_by_in_out(network, 1, 2, 0.1, global_innov); //this creates node 3 between 1 and 2
         let (network, global_innov) = add_node_by_in_out(network, 1, 3, -0.8, global_innov); //this creates node 4 between 1 and 3
-        let (network, global_innov) = add_connection(network, 0, 2, -0.4, global_innov);
+        let (network, global_innov) = add_connection_by_int(network, 0, 2, -0.4, global_innov);
         let (network, global_innov) = add_node_by_in_out(network, 0, 2, 0.0, global_innov); //this create node 5 between 0 and 2
         let network = diable_connection_by_in_out(network, 0, 5);
-        let (network, global_innov) = add_connection(network, 0, 4, -0.8, global_innov);
-        let (network, global_innov) = add_connection(network, 3, 5, 0.5, global_innov);
-        let (network, global_innov) = add_connection(network, 5, 4, -0.1, global_innov);
+        let (network, global_innov) = add_connection_by_int(network, 0, 4, -0.8, global_innov);
+        let (network, global_innov) = add_connection_by_int(network, 3, 5, 0.5, global_innov);
+        let (network, global_innov) = add_connection_by_int(network, 5, 4, -0.1, global_innov);
         
         let network = network.set_phenotype();
         let new_network = network.activate(vec![-0.9, 0.6]);
@@ -466,12 +526,12 @@ mod tests {
 
     fn testing_organism_pair() -> (Organism, Organism) {
         //inspired by the crossover example from the original paper by K Stanley
-        let innovation_map:HashMap<(usize, usize), usize> = vec![((0,3),0), ((1,3),1), ((2,3),2)].into_iter().collect();
+        // let innovation_map:HashMap<(InputNodeId, OutputNodeId), InnovationNumber> = vec![((InputNodeId(0),OutputNodeId(3)),InnovationNumber(0)), ((InputNodeId(1),OutputNodeId(3)),InnovationNumber(1)), ((InputNodeId(2),OutputNodeId(3)),InnovationNumber(2))].into_iter().collect();
 
         let organism_1 = {
-            let network = Network::init_from_starting_innovation_map(3, 1, &innovation_map);
+            let network = Network::init(3, 1);
             let (network, _) = add_node_by_in_out(network, 1, 3, 0.5, 3);
-            let (network, _) = add_connection(network, 0, 4, 0.5, 7);
+            let (network, _) = add_connection_by_int(network, 0, 4, 0.5, 7);
             Organism{
                 network,
                 fitness: 3
@@ -479,11 +539,11 @@ mod tests {
         };
 
         let organism_2 = {
-            let network = Network::init_from_starting_innovation_map(3, 1, &innovation_map);
+            let network = Network::init(3, 1);
             let (network, _) = add_node_by_in_out(network, 1, 3, 0.5, 3);
             let (network, _) = add_node_by_in_out(network, 4, 3, 0.5, 5);
-            let (network, _) = add_connection(network, 2, 4, 0.5, 8);
-            let (network, _) = add_connection(network, 0, 5, 0.5, 9);
+            let (network, _) = add_connection_by_int(network, 2, 4, 0.5, 8);
+            let (network, _) = add_connection_by_int(network, 0, 5, 0.5, 9);
 
             Organism{
                 network,
@@ -506,5 +566,12 @@ mod tests {
         let gene_pairs: Vec<(Option<&Connection>, Option<&Connection>)> = align_genes(&organism_1, &organism_2);
         assert_approx_eq!(genome_distance(&gene_pairs, 1., 0., 0.), 2. / 9.);
         assert_approx_eq!(genome_distance(&gene_pairs, 0., 1., 0.), 3. / 9.);
+    }
+
+    #[test]
+    fn large_init(){
+        let network = Network::init(9, 10);
+        assert_eq!(network.genome[89].innovation_num.0, 89);
+        assert_eq!(network.genome.len(), 90);
     }
 }
