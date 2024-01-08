@@ -1,12 +1,75 @@
 use tailcall::tailcall;
-use rand::distributions::{Distribution, Uniform};
+use rand::{distributions::{Distribution, Uniform}, rngs::ThreadRng};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Eq, PartialEq, Hash, PartialOrd, Copy, Clone)]
-pub struct InputNodeId(usize);
+mod Vector {
+    enum AllignedPair<T>{
+        HasBoth(T, T),
+        HasLeft(T),
+        HasRight(T),
+    }
+
+    fn allign<T,I,R>(v1: Vec<T>, v2: Vec<T>, get_id: &dyn Fn(T) -> I, map: &dyn Fn(AllignedPair<T>) -> R) -> Vec<R> where I: std::cmp::PartialOrd{
+        let n1 = v1.len();
+        let n2 = v2.len();
+        let n_res = std::cmp::max(n1,n2);
+        let mut i1 = 0;
+        let mut i2 = 0;
+        let mut res = Vec::with_capacity(n_res);
+
+        while (i1 < n1 || i2 < n2) {
+            if i1 < n1 {
+                let x1 = v1[i1];
+                let id1 = get_id(x1);
+                if i2 < n2 {
+                    //still processing v1 and v2
+                    let x2 = v2[i2];
+                    let id2 = get_id(x2);
+                    if id1 == id2 {
+                        let pair = AllignedPair::HasBoth(x1, x2);
+                        res.push(map(pair));
+                        i1 += 1;
+                        i2 += 1;
+                    } else if id1 < id2 {
+                        let pair = AllignedPair::HasLeft(x1);
+                        res.push(map(pair));
+                        i1 += 1;
+                    } else {
+                        let pair = AllignedPair::HasRight(x2);
+                        res.push(map(pair));
+                        i2 += 1;
+                    }
+                } else {
+                    //still processing v1 but finished with v2
+                    let pair = AllignedPair::HasLeft(x1);
+                    res.push(map(pair));
+                    i1 += 1;
+                }
+            } else {
+                //finished processing ar1 but still busy with ar2
+                let x2 = v2[i2];
+                let id2 = get_id(x2);
+                let pair = AllignedPair::HasRight(x2);
+                res.push(map(pair));
+                i2 += 1;
+            }
+        }
+        res
+    }
+
+    fn prefer_left<T,I>(v1: Vec<T>, v2: Vec<T>, get_id: &dyn Fn(T) -> I) -> Vec<T> where I: std::cmp::PartialOrd {
+        let map = |x| {
+            match x {
+                AllignedPair::HasBoth(a, _) | AllignedPair::HasLeft(a) => a,
+                AllignedPair::HasRight(b) => b
+            }
+        };
+        allign(v1, v2, get_id, &map)
+    }
+}
 
 #[derive(Eq, PartialEq, Hash, PartialOrd, Copy, Clone)]
-pub struct OutputNodeId(usize);
+pub struct NodeId(usize);
 
 #[derive(PartialEq, PartialOrd, Copy, Clone)]
 pub struct InnovationNumber(usize);
@@ -15,88 +78,145 @@ impl InnovationNumber {
         InnovationNumber(self.0 + 1)
     }
 }
-struct Connection {
-    in_node_id: InputNodeId,
-    out_node_id: OutputNodeId,
+
+struct SensorNode{
+    id: NodeId,
+    value: f64,
+}
+
+struct RelayNode<'a>{
+    id: NodeId,
+    value: f64,
+    is_active: bool,
+    has_active_inputs: bool,
+    inputs: Vec<&'a Connection<'a>>,
+    active_sum: f64,
+    is_output: bool,
+}
+
+impl RelayNode<'_> {
+    fn create_output<'a>(i:usize) -> RelayNode<'a> {
+        RelayNode{
+            id: NodeId(i),
+            value: 0.,
+            is_active: false,
+            has_active_inputs: false,
+            inputs: Vec::new(),
+            active_sum: 0.,
+            is_output: true,
+        }
+    }
+}
+
+enum Node<'a> {
+    Relay(&'a RelayNode<'a>),
+    Sensor(&'a SensorNode),
+}
+
+impl Node<'_> {
+    fn id(self) -> NodeId {
+        match self {
+            Node::Relay(node) => node.id,
+            Node::Sensor(node) => node.id,
+        }
+    }
+
+    fn value(self) -> f64 {
+        match self {
+            Node::Relay(node) => node.value,
+            Node::Sensor(node) => node.value,
+        }
+    }
+
+    fn is_active(self) -> bool {
+        match self {
+            Node::Relay(node) => node.is_active,
+            Node::Sensor(node) => true,
+        }
+    }
+}
+struct Connection<'a> {
+    in_node: Node<'a>,
+    out_node: &'a RelayNode<'a>,
     weight: f64,
-    innovation_num: InnovationNumber,
+    innovation: InnovationNumber,
     enabled: bool
 }
 
-impl Connection {
-    fn copy_conn(&self) -> Connection {
-        Connection { in_node_id: self.in_node_id, out_node_id: self.out_node_id, weight: self.weight, innovation_num: self.innovation_num, enabled: self.enabled }
-    }
+// impl Connection {
+//     fn copy_conn(&self) -> Connection {
+//         Connection { in_node_id: self.in_node_id, out_node_id: self.out_node_id, weight: self.weight, innovation_num: self.innovation_num, enabled: self.enabled }
+//     }
+// }
+
+struct Network<'a> {
+    genome: Vec<Connection<'a>>,
+    sensor_nodes: Vec<SensorNode>,
+    output_nodes: Vec<RelayNode<'a>>,
+    hidden_nodes: Vec<RelayNode<'a>>,
+    node_lookup: Vec<Node<'a>>,
 }
 
-struct Network {
-    n_sensor_nodes: usize,
-    n_output_nodes: usize,
-    n_hidden_nodes: usize,
-    genome: Vec<Connection>,
-    input_connections_map: Vec<Vec<usize>>,
-    nodes_with_active_inputs: Vec<bool>,
-    active_nodes: Vec<bool>,
-    active_sums: Vec<f64>,
-    node_values: Vec<f64>
-}
+impl Network<'_> {
+    fn set_phenotype<'a>(self) -> Network<'a> {
+        for node in self.hidden_nodes.iter() {
+            node.inputs.clear()
+        }
 
-impl Network {
-    fn n_total_nodes(&self) -> usize {
-        self.n_hidden_nodes + self.n_output_nodes + self.n_sensor_nodes
-    }
+        for node in self.output_nodes.iter() {
+            node.inputs.clear()
+        }
 
-    fn set_phenotype(mut self) -> Network {
-        let n_activateable = self.n_output_nodes + self.n_hidden_nodes;
-        let node_offset = self.n_sensor_nodes;
-        self.input_connections_map = (0..n_activateable).map(|_| Vec::new()).collect();
-        for (conn_index, conn) in self.genome.iter().enumerate() {
-            self.input_connections_map[conn.out_node_id.0 - node_offset].push(conn_index)
+        for conn in self.genome.iter() {
+            conn.out_node.inputs.push(conn)
         }
         self
     }
 
-    fn empty(n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
-        let mut active_nodes = vec![true; n_sensor_nodes];
-        active_nodes.append(&mut vec![false; n_output_nodes]);
-        Network {
-            n_sensor_nodes,
-            n_output_nodes,
-            n_hidden_nodes: 0,
-            genome: Vec::new(),
-            input_connections_map: Vec::new(),
-            active_nodes,
-            nodes_with_active_inputs: vec![false; n_output_nodes], //sensors do not have inputs so no need to have values for them here 
-            active_sums: vec![0.; n_output_nodes],
-            node_values: vec![0.; n_sensor_nodes + n_output_nodes]
-        }
-    }
+    // fn empty(n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
+    //     let mut active_nodes = vec![true; n_sensor_nodes];
+    //     active_nodes.append(&mut vec![false; n_output_nodes]);
+    //     Network {
+    //         n_sensor_nodes,
+    //         n_output_nodes,
+    //         n_hidden_nodes: 0,
+    //         genome: Vec::new(),
+    //         input_connections_map: Vec::new(),
+    //         active_nodes,
+    //         nodes_with_active_inputs: vec![false; n_output_nodes], //sensors do not have inputs so no need to have values for them here 
+    //         active_sums: vec![0.; n_output_nodes],
+    //         node_values: vec![0.; n_sensor_nodes + n_output_nodes]
+    //     }
+    // }
 
-    fn create_from_genome(n_sensor_nodes: usize, n_output_nodes: usize, genome: Vec<Connection>) -> Network {
-        let hidden_index_start = n_sensor_nodes + n_output_nodes;
-        let mut hidden_nodes = HashSet::new();
-        for conn in genome.iter() {
-            if conn.in_node_id.0 >= hidden_index_start {hidden_nodes.insert(conn.in_node_id.0);}
-            if conn.out_node_id.0 >= hidden_index_start {hidden_nodes.insert(conn.out_node_id.0);}
-        }
-        let n_hidden_nodes = hidden_nodes.len();
-        let n_non_sensor = n_output_nodes + n_hidden_nodes;
-        let n_total_nodes = n_non_sensor + n_sensor_nodes;
-        let mut active_nodes = vec![true; n_sensor_nodes];
-        active_nodes.append(&mut vec![false; n_non_sensor]);
-        Network {
-            n_sensor_nodes,
-            n_output_nodes,
-            n_hidden_nodes,
-            genome,
-            input_connections_map: Vec::new(),
-            active_nodes,
-            nodes_with_active_inputs: vec![false; n_non_sensor],
-            active_sums: vec![0.; n_non_sensor],
-            node_values: vec![0.; n_total_nodes]
-        }
+    // fn create_from_genome(n_sensor_nodes: usize, n_output_nodes: usize, genome: Vec<Connection>) -> Network {
+    //     let sensor_nodes = genome[0 .. n_sensor_nodes - 1].iter().map(|conn| conn.in_node)
+    //     let sensor_nodes = (0..n_sensor_nodes-1).map(|i| )
+        
+    //     let hidden_index_start = n_sensor_nodes + n_output_nodes;
+    //     let mut hidden_nodes = HashSet::new();
+    //     for conn in genome.iter() {
+    //         if conn.in_node_id.0 >= hidden_index_start {hidden_nodes.insert(conn.in_node_id.0);}
+    //         if conn.out_node_id.0 >= hidden_index_start {hidden_nodes.insert(conn.out_node_id.0);}
+    //     }
+    //     let n_hidden_nodes = hidden_nodes.len();
+    //     let n_non_sensor = n_output_nodes + n_hidden_nodes;
+    //     let n_total_nodes = n_non_sensor + n_sensor_nodes;
+    //     let mut active_nodes = vec![true; n_sensor_nodes];
+    //     active_nodes.append(&mut vec![false; n_non_sensor]);
+    //     Network {
+    //         n_sensor_nodes,
+    //         n_output_nodes,
+    //         n_hidden_nodes,
+    //         genome,
+    //         input_connections_map: Vec::new(),
+    //         active_nodes,
+    //         nodes_with_active_inputs: vec![false; n_non_sensor],
+    //         active_sums: vec![0.; n_non_sensor],
+    //         node_values: vec![0.; n_total_nodes]
+    //     }
 
-    }
+    // }
 
     // fn init_from_starting_innovation_map(n_sensor_nodes: usize, n_output_nodes: usize, innovation_map: &HashMap<(InputNodeId, OutputNodeId), InnovationNumber>) -> Network {
     //     let mut res = Network::empty(n_sensor_nodes, n_output_nodes);
@@ -109,20 +229,47 @@ impl Network {
     //     res.set_phenotype()
     // }
 
-    fn init(n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
-        let mut res = Network::empty(n_sensor_nodes, n_output_nodes);
+    fn init<'a>(mut rng: ThreadRng, n_sensor_nodes: usize, n_output_nodes: usize) -> Network<'a> {
         let between = Uniform::from(-1.0..1.0);
-        let mut rng = rand::thread_rng();
+        let n_total_nodes = n_sensor_nodes + n_output_nodes;
+        let mut node_lookup = Vec::with_capacity(n_total_nodes);
 
-        for in_id in 0..n_sensor_nodes {
-            for out_id in n_sensor_nodes..(n_sensor_nodes + n_output_nodes) {
-                let weight = between.sample(&mut rng);
-                let innovation_number = in_id * n_output_nodes + out_id - n_sensor_nodes;
-                let conn = Connection { in_node_id: InputNodeId(in_id), out_node_id: OutputNodeId(out_id), weight, innovation_num: InnovationNumber(innovation_number), enabled: true};
-                res.genome.push(conn);
+        let sensor_nodes : Vec<_> = (0 .. n_sensor_nodes).map(|i| {
+            let n = SensorNode{id: NodeId(i), value: 0.};
+            node_lookup.push(Node::Sensor(&n));
+            n
+        }).collect();
+        let mut output_nodes : Vec<_> = (0 .. n_output_nodes).map(|i| {
+            let n = RelayNode::create_output(i + n_sensor_nodes);
+            node_lookup.push(Node::Relay(&n));
+            n
+        }).collect();
+
+        let n_connections = n_sensor_nodes * n_output_nodes;
+        let mut genome : Vec<Connection> = Vec::with_capacity(n_connections);
+
+        for out_index in 0..n_output_nodes {
+            for in_index in 0..n_sensor_nodes {
+                let innovation_number = out_index * n_sensor_nodes + in_index;
+                let conn = Connection{
+                    in_node: Node::Sensor(&sensor_nodes[in_index]),
+                    out_node: &output_nodes[out_index],
+                    weight: between.sample(&mut rng),
+                    innovation: InnovationNumber(innovation_number),
+                    enabled: true
+                };
+                genome.push(conn);
+                output_nodes[out_index].inputs.push(&conn)
             }
         }
-        res.set_phenotype()
+
+        Network {
+            genome,
+            sensor_nodes,
+            output_nodes,
+            hidden_nodes: Vec::new(),
+            node_lookup
+        }
     }
 
     fn activate(mut self, sensor_values: Vec<f64>) -> Network {
