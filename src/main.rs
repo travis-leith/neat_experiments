@@ -33,7 +33,7 @@ impl GameBoard {
 fn main() {
     let population_size = 100;
 
-    let organisms : Vec<Organism> = (0 .. population_size).map(|_|Organism::init(9, 9)).collect();
+    // let organisms : Vec<Organism> = (0 .. population_size).map(|_|Organism::init(9, 9)).collect();
 
     // fn get_ai_move(organism: &Organism, gameboard: &GameBoard) -> PlayerMove {
     //     let sensor_values = gameboard.as_sensor_values();
