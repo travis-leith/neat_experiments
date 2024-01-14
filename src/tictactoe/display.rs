@@ -17,14 +17,15 @@ impl fmt::Display for Cell {
 }
 
 pub fn board_to_string(board: &GameBoard) -> String {
-    let tl = &board.top_lft;
-    let tm = &board.top_mid;
-    let tr = &board.top_rgt;
-    let ml = &board.mid_lft;
-    let mm = &board.mid_mid;
-    let mr = &board.mid_rgt;
-    let bl = &board.bot_lft;
-    let bm = &board.bot_mid;
-    let br = &board.bot_rgt;
+    use CellLocation::*;
+    let tl = &board.get_cell(TopLft);
+    let tm = &board.get_cell(TopMid);
+    let tr = &board.get_cell(TopRgt);
+    let ml = &board.get_cell(MidLft);
+    let mm = &board.get_cell(MidMid);
+    let mr = &board.get_cell(MidRgt);
+    let bl = &board.get_cell(BotLft);
+    let bm = &board.get_cell(BotMid);
+    let br = &board.get_cell(BotRgt);
     format!{"{tl} {tm} {tr}\n{ml} {mm} {mr}\n{bl} {bm} {br}"}
 }

@@ -1,8 +1,33 @@
 use std::io::{self, BufRead};
 use rand::seq::SliceRandom;
+// use tailcall::tailcall;
 use crate::tictactoe::game::*;
 use crate::tictactoe::display::board_to_string;
 
+fn get_random_move(gameboard: &GameBoard) -> CellLocation {
+    let make_move = |m:CellLocation| {
+        match gameboard.get_cell(m) {
+            Cell(None) => Some(m),
+            _ => None
+        }
+    };
+
+    let possible_moves: [Option<CellLocation>; 9] = [
+        make_move(CellLocation::TopLft),
+        make_move(CellLocation::TopMid),
+        make_move(CellLocation::TopRgt),
+        make_move(CellLocation::MidLft),
+        make_move(CellLocation::MidMid),
+        make_move(CellLocation::MidRgt),
+        make_move(CellLocation::BotLft),
+        make_move(CellLocation::BotMid),
+        make_move(CellLocation::BotRgt),
+    ];
+
+    let possible_moves: Vec<CellLocation> = possible_moves.iter().flatten().cloned().collect();
+    let mut rng = rand::thread_rng();
+    possible_moves.choose(&mut rng).copied().unwrap_or(CellLocation::BotLft)
+}
 
 fn get_valid_input_from_user<T>(f:fn() -> Option<T>) -> T {
     loop {
@@ -33,7 +58,7 @@ fn get_first_player_from_user() -> bool {
     get_valid_input_from_user(f)
 }
 
-fn start_game() -> GameState {
+fn start_game() -> PlayingGameState {
     let player_turn = 
         if get_first_player_from_user() {
             Player::Cross
@@ -41,58 +66,27 @@ fn start_game() -> GameState {
             Player::Circle
         };
 
-    let gameboard = empty_game_board();
-    GameState::Playing(PlayingGameState { gameboard, player_turn })
+    // let gameboard = empty_game_board();
+    // PlayingGameState { gameboard, player_turn }
+    new_game(player_turn)
 }
 
-fn get_random_move(gameboard: &GameBoard) -> Option<PlayerMove> {
-    fn make_move(x: &Cell, m:PlayerMove) -> Option<PlayerMove>{
-        match x.0 {
-            None => Some(m),
-            _    => None
-        }
-    }
-
-    let possible_moves: [Option<PlayerMove>; 9] = [
-        make_move(&gameboard.top_lft, PlayerMove::TopLft),
-        make_move(&gameboard.top_mid, PlayerMove::TopMid),
-        make_move(&gameboard.top_rgt, PlayerMove::TopRgt),
-        make_move(&gameboard.mid_lft, PlayerMove::MidLft),
-        make_move(&gameboard.mid_mid, PlayerMove::MidMid),
-        make_move(&gameboard.mid_rgt, PlayerMove::MidRgt),
-        make_move(&gameboard.bot_lft, PlayerMove::BotLft),
-        make_move(&gameboard.bot_mid, PlayerMove::BotMid),
-        make_move(&gameboard.bot_rgt, PlayerMove::BotRgt),
-    ];
-
-    let possible_moves: Vec<PlayerMove> = possible_moves.iter().flatten().cloned().collect();
-    let mut rng = rand::thread_rng();
-    possible_moves.choose(&mut rng).copied()
-}
-
-fn get_ai_move(gameboard: &GameBoard) -> PlayerMove {
-    match get_random_move(gameboard) {
-        Some(player_move) => player_move,
-        None => PlayerMove::TopLft
-    }
-}
-
-fn string_to_player_move(s: String) -> Option<PlayerMove> {
+fn string_to_player_move(s: String) -> Option<CellLocation> {
     match s.to_lowercase().as_str() {
-        "q" => Some(PlayerMove::TopLft),
-        "w" => Some(PlayerMove::TopMid),
-        "e" => Some(PlayerMove::TopRgt),
-        "a" => Some(PlayerMove::MidLft),
-        "s" => Some(PlayerMove::MidMid),
-        "d" => Some(PlayerMove::MidRgt),
-        "z" => Some(PlayerMove::BotLft),
-        "x" => Some(PlayerMove::BotMid),
-        "c" => Some(PlayerMove::BotRgt),
+        "q" => Some(CellLocation::TopLft),
+        "w" => Some(CellLocation::TopMid),
+        "e" => Some(CellLocation::TopRgt),
+        "a" => Some(CellLocation::MidLft),
+        "s" => Some(CellLocation::MidMid),
+        "d" => Some(CellLocation::MidRgt),
+        "z" => Some(CellLocation::BotLft),
+        "x" => Some(CellLocation::BotMid),
+        "c" => Some(CellLocation::BotRgt),
         _   => None
     }
 }
 
-fn maybe_get_user_move() -> Option<PlayerMove> {
+fn maybe_get_user_move() -> Option<CellLocation> {
     println!("Select move from qweasdzxc");
     let stdin = io::stdin();
     let mut iterator = stdin.lock().lines();
@@ -101,7 +95,10 @@ fn maybe_get_user_move() -> Option<PlayerMove> {
     string_to_player_move(line1)
 }
 
-fn get_user_move(_: &GameBoard) -> PlayerMove {
+fn get_user_move(gameboard: &GameBoard) -> CellLocation {
+    clear_screen();
+    let s = board_to_string(gameboard);
+    println!("{s}");
     let f = || maybe_get_user_move();
     get_valid_input_from_user(f)
 }
@@ -111,7 +108,15 @@ fn ask_user_for_new_game() -> bool {
     get_valid_input_from_user(f)
 }
 
-fn end_game(game_over_state: &GameOverState) {
+fn clear_screen() {
+    print!("{}[2J", 27 as char);
+}
+
+fn end_game(gameboard: &GameBoard, game_over_state: &GameOverState) {
+    clear_screen();
+    let s = board_to_string(gameboard);
+    println!("{s}");
+
     match game_over_state {
         GameOverState::Tied => println!("No winners - game is tied!"),
         GameOverState::Won(Player::Cross) => println!("User (you) have won!"),
@@ -119,44 +124,48 @@ fn end_game(game_over_state: &GameOverState) {
     }
 }
 
-fn clear_screen() {
-    print!("{}[2J", 27 as char);
-}
+struct RandomAiVsUser;
+impl Controller for RandomAiVsUser {
+    fn retry_allowed(&self) -> bool {
+        true
+    }
 
-fn display_game(gamestate: &GameState) {
-    clear_screen();
-    match gamestate {
-        GameState::Starting => println!("New game is starting"),
-        GameState::Playing(playing_state) => {
-            let s = board_to_string(&playing_state.gameboard);
-            println!("{s}");
-        },
-        GameState::GameOver(game_over_state) => end_game(&game_over_state)
+    fn circle_mover(&self, gameboard: &GameBoard) -> CellLocation {
+        get_random_move(gameboard)
+    }
+
+    fn cross_mover(&self, gameboard: &GameBoard) -> CellLocation {
+        get_user_move(gameboard)
     }
 }
 
-impl GameState {
-    fn not_exiting(&self) -> bool {
-        match &self {
-            GameState::GameOver(_) => false,
-            _ => true
+// #[tailcall]
+fn single_game_loop(mut playing_state: PlayingGameState) -> (GameBoard, GameOverState) {
+    // let mut keep_going = true;
+
+    loop {
+        // keep_going = false;
+        match play_game(&RandomAiVsUser, playing_state) {
+            Ok(game_over_state) => 
+                break game_over_state,
+            Err(new_playing_state) => {
+                println!("you have entered an invalid move. Try again ...");
+                playing_state = new_playing_state;
+                // single_game_loop(new_playing_state)
+            }
         }
-    }
-}
-fn inner_game_loop() {
-    let mut gamestate = GameState::Starting;
-
-    display_game(&gamestate);
-    while gamestate.not_exiting() {
-        transition_gamestate(&mut gamestate, start_game, get_user_move, get_ai_move);
-        display_game(&gamestate);
     }
 }
 
 pub fn game_loop() {
-    let mut play_a_game = true;
-    while play_a_game {
-        inner_game_loop();
-        play_a_game = ask_user_for_new_game()
+    loop {
+        let gamestate = start_game();
+
+        let (gameboard, game_over_state) = single_game_loop(gamestate);
+        end_game(&gameboard, &game_over_state);
+
+        if !ask_user_for_new_game() {
+            break
+        }
     }
 }
