@@ -10,10 +10,10 @@ pub enum Player {
 pub struct Cell(pub Option<Player>);
 
 pub struct GameBoard {
-    cells: [Cell; 9]
+    pub cells: [Cell; 9]
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum CellLocation {
     TopLft = 0,
     TopMid = 1,
@@ -26,6 +26,23 @@ pub enum CellLocation {
     BotRgt = 8
 }
 
+impl CellLocation {
+    pub fn from_usize(i:usize) -> Option<CellLocation> {
+        match i {
+            0 => Some(Self::TopLft),
+            1 => Some(Self::TopMid),
+            2 => Some(Self::TopRgt),
+            3 => Some(Self::MidLft),
+            4 => Some(Self::MidMid),
+            5 => Some(Self::MidRgt),
+            6 => Some(Self::BotLft),
+            7 => Some(Self::BotMid),
+            8 => Some(Self::BotRgt),
+            _ => None
+        }
+    }
+}
+
 pub struct PlayingGameState {
     pub gameboard: GameBoard,
     pub player_turn: Player
@@ -33,7 +50,8 @@ pub struct PlayingGameState {
 
 pub enum GameOverState {
     Tied,
-    Won(Player)
+    Won(Player),
+    Disqualified(Player, CellLocation)
 }
 
 pub enum GameState {
@@ -104,12 +122,12 @@ fn check_game_over (gameboard: &GameBoard) -> Option<GameOverState> {
 }
 
 pub trait Controller {
-    fn circle_mover(&self, gameboard: &GameBoard) -> CellLocation;
-    fn cross_mover(&self, gameboard: &GameBoard) -> CellLocation;
-    fn retry_allowed(&self) -> bool;
+    fn circle_mover(&mut self, gameboard: &GameBoard) -> CellLocation;
+    fn cross_mover(&mut self, gameboard: &GameBoard) -> CellLocation;
+    fn retry_allowed(&mut self) -> bool;
 }
 
-fn play_one_move(ctrl: &impl Controller, mut playing_state: PlayingGameState) -> Result<GameState, PlayingGameState> {
+fn play_one_move(mut ctrl: &mut impl Controller, mut playing_state: PlayingGameState) -> Result<GameState, PlayingGameState> {
     let (player_move, next_player) = match playing_state.player_turn {
         Player::Cross => (ctrl.cross_mover(&playing_state.gameboard), Player::Circle),
         Player::Circle => (ctrl.circle_mover(&playing_state.gameboard), Player::Cross)
@@ -126,12 +144,12 @@ fn play_one_move(ctrl: &impl Controller, mut playing_state: PlayingGameState) ->
     } else if ctrl.retry_allowed() {
         Err(playing_state)
     } else {
-        Ok(GameState::GameOver(playing_state.gameboard, GameOverState::Won(next_player)))
+        Ok(GameState::GameOver(playing_state.gameboard, GameOverState::Disqualified(playing_state.player_turn, player_move)))
     }
 }
 
 #[tailcall]
-pub fn play_game(ctrl: &impl Controller, playing_state: PlayingGameState) -> Result<(GameBoard, GameOverState), PlayingGameState> {
+pub fn play_game(ctrl: &mut impl Controller, playing_state: PlayingGameState) -> Result<(GameBoard, GameOverState), PlayingGameState> {
     match play_one_move(ctrl, playing_state) {
         Ok(GameState::Playing(new_playing_state)) => play_game(ctrl, new_playing_state),
         Ok(GameState::GameOver(gameboard, game_over_state)) => Ok((gameboard, game_over_state)),

@@ -4,7 +4,7 @@ use rand::seq::SliceRandom;
 use crate::tictactoe::game::*;
 use crate::tictactoe::display::board_to_string;
 
-fn get_random_move(gameboard: &GameBoard) -> CellLocation {
+pub fn get_random_move(gameboard: &GameBoard) -> CellLocation {
     let make_move = |m:CellLocation| {
         match gameboard.get_cell(m) {
             Cell(None) => Some(m),
@@ -26,7 +26,7 @@ fn get_random_move(gameboard: &GameBoard) -> CellLocation {
 
     let possible_moves: Vec<CellLocation> = possible_moves.iter().flatten().cloned().collect();
     let mut rng = rand::thread_rng();
-    possible_moves.choose(&mut rng).copied().unwrap_or(CellLocation::BotLft)
+    possible_moves.choose(&mut rng).cloned().unwrap_or(CellLocation::BotLft)
 }
 
 fn get_valid_input_from_user<T>(f:fn() -> Option<T>) -> T {
@@ -95,7 +95,12 @@ fn maybe_get_user_move() -> Option<CellLocation> {
     string_to_player_move(line1)
 }
 
-fn get_user_move(gameboard: &GameBoard) -> CellLocation {
+fn clear_screen() {
+    print!("{}[2J", 27 as char);
+}
+
+pub fn get_user_move(gameboard: &GameBoard) -> CellLocation {
+    
     clear_screen();
     let s = board_to_string(gameboard);
     println!("{s}");
@@ -108,10 +113,6 @@ fn ask_user_for_new_game() -> bool {
     get_valid_input_from_user(f)
 }
 
-fn clear_screen() {
-    print!("{}[2J", 27 as char);
-}
-
 fn end_game(gameboard: &GameBoard, game_over_state: &GameOverState) {
     clear_screen();
     let s = board_to_string(gameboard);
@@ -120,32 +121,19 @@ fn end_game(gameboard: &GameBoard, game_over_state: &GameOverState) {
     match game_over_state {
         GameOverState::Tied => println!("No winners - game is tied!"),
         GameOverState::Won(Player::Cross) => println!("User (you) have won!"),
-        GameOverState::Won(Player::Circle) => println!("AI has won!")
-    }
-}
-
-struct RandomAiVsUser;
-impl Controller for RandomAiVsUser {
-    fn retry_allowed(&self) -> bool {
-        true
-    }
-
-    fn circle_mover(&self, gameboard: &GameBoard) -> CellLocation {
-        get_random_move(gameboard)
-    }
-
-    fn cross_mover(&self, gameboard: &GameBoard) -> CellLocation {
-        get_user_move(gameboard)
+        GameOverState::Won(Player::Circle) => println!("AI has won!"),
+        GameOverState::Disqualified(Player::Cross, m) => println!("User (you) have tried to play an illegal move ({:?}) and are disqualified!", m),
+        GameOverState::Disqualified(Player::Circle, m) => println!("AI tried to play an illegal move ({:?}) and is disqualified!", m)
     }
 }
 
 // #[tailcall]
-fn single_game_loop(mut playing_state: PlayingGameState) -> (GameBoard, GameOverState) {
+fn single_game_loop(ctrl: &mut impl Controller, mut playing_state: PlayingGameState) -> (GameBoard, GameOverState) {
     // let mut keep_going = true;
 
     loop {
         // keep_going = false;
-        match play_game(&RandomAiVsUser, playing_state) {
+        match play_game( ctrl, playing_state) {
             Ok(game_over_state) => 
                 break game_over_state,
             Err(new_playing_state) => {
@@ -157,11 +145,11 @@ fn single_game_loop(mut playing_state: PlayingGameState) -> (GameBoard, GameOver
     }
 }
 
-pub fn game_loop() {
+pub fn game_loop(ctrl: &mut impl Controller) {
     loop {
         let gamestate = start_game();
 
-        let (gameboard, game_over_state) = single_game_loop(gamestate);
+        let (gameboard, game_over_state) = single_game_loop(ctrl, gamestate);
         end_game(&gameboard, &game_over_state);
 
         if !ask_user_for_new_game() {

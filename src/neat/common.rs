@@ -10,7 +10,7 @@ mod vector {
         HasRight(&'a T),
     }
 
-    pub fn allign<'a, T,I,R>(v1: Vec<T>, v2: Vec<T>, get_id: &'a dyn Fn(&T) -> I, map: &'a mut dyn FnMut(AllignedPair<T>) -> R) -> Vec<R> where I: std::cmp::PartialOrd{
+    pub fn allign<'a, T,I,R>(v1: &Vec<T>, v2: &Vec<T>, get_id: &'a dyn Fn(&T) -> I, map: &'a mut dyn FnMut(AllignedPair<T>) -> R) -> Vec<R> where I: std::cmp::PartialOrd{
         let n1 = v1.len();
         let n2 = v2.len();
         let n_res = std::cmp::max(n1,n2);
@@ -65,7 +65,7 @@ mod vector {
 
 
 // #[derive(PartialEq, PartialOrd, Copy, Clone)]
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct InnovationNumber(usize);
 impl InnovationNumber {
     fn inc(self) -> InnovationNumber {
@@ -73,13 +73,14 @@ impl InnovationNumber {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 enum NodeType{
     Sensor,
     Hidden,
     Output,
 }
 
+#[derive(Clone)]
 struct Node{
     // id: NodeId,
     value: f64,
@@ -115,7 +116,8 @@ struct Connection {
     enabled: bool
 }
 
-struct Network {
+#[derive(Clone)]
+pub struct Network {
     genome: Vec<Connection>,
     n_sensor_nodes: usize,
     n_output_nodes: usize,
@@ -169,7 +171,7 @@ impl Network {
 
     }
 
-    fn init(mut rng: ThreadRng, n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
+    pub fn init(rng: &mut ThreadRng, n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
         let between = Uniform::from(-1.0..1.0);
         let n_total_nodes = n_sensor_nodes + n_output_nodes;
         let mut nodes = Vec::with_capacity(n_total_nodes);
@@ -196,7 +198,7 @@ impl Network {
                 let conn = Connection{
                     in_node_id,
                     out_node_id,
-                    weight: between.sample(&mut rng),
+                    weight: between.sample(rng),
                     innovation: InnovationNumber(innovation_number),
                     enabled: true
                 };
@@ -215,7 +217,7 @@ impl Network {
         }
     }
 
-    fn activation_pulse(mut self) -> (Network, bool) {
+    fn activation_pulse(&mut self) -> bool {
         // let nodes = &mut self.nodes[..];
         // for i in self.n_sensor_nodes..nodes.len() {
         //     nodes[i].has_active_inputs = false;
@@ -254,10 +256,10 @@ impl Network {
             }
         }
 
-        (self, all_active)
+        all_active
     }
 
-    fn activate(mut self, sensor_values: Vec<f64>) -> Network {
+    pub fn activate(&mut self, sensor_values: Vec<f64>) {
         debug_assert!(sensor_values.len() == self.n_sensor_nodes, "sensor values not the right length for network");
         // set the sensor values
         for (i, value) in sensor_values.into_iter().enumerate() {
@@ -265,19 +267,23 @@ impl Network {
         }
         
         #[tailcall]
-        fn activate_inner(network: Network, remaining_iterations: usize) -> Network {
+        fn activate_inner(network: &mut Network, remaining_iterations: usize) {
             if remaining_iterations == 0 {
                 panic!("Too many iterations :(")
             } else {
-                let (new_network, all_activated) = network.activation_pulse();
+                let all_activated = network.activation_pulse();
                 if all_activated {
-                    new_network
+                    // new_network
                 } else {
-                    activate_inner(new_network, remaining_iterations - 1)
+                    activate_inner(network, remaining_iterations - 1)
                 }
             }
         }
         activate_inner(self, 20)        
+    }
+
+    pub fn get_output(&self) -> Vec<f64> {
+        self.nodes[self.n_sensor_nodes .. self.n_sensor_nodes + self.n_output_nodes].iter().map(|n| n.value).collect()
     }
 }
 
@@ -295,7 +301,7 @@ fn add_connection(mut network: Network, in_node_id: usize, out_node_id: usize, w
         in_node_id,
         out_node_id,
         weight,
-        innovation: global_innovation,
+        innovation: global_innovation.clone(),
         enabled: true
     };
     let new_conn_ix = network.genome.len();
@@ -347,24 +353,22 @@ pub struct Organism {
 }
 
 impl Organism {
-    pub fn init(rng:ThreadRng , n_sensor_nodes: usize, n_output_nodes: usize) -> Organism {
+    pub fn init(rng: &mut ThreadRng , n_sensor_nodes: usize, n_output_nodes: usize) -> Organism {
         Organism { network: Network::init(rng, n_sensor_nodes, n_output_nodes), fitness: 0 }
     }
 
-    pub fn activate(mut self, sensor_values: Vec<f64>) -> Organism {
-        let network = self.network.activate(sensor_values);
-        self.network = network;
-        self
+    pub fn activate(&mut self, sensor_values: Vec<f64>) {
+        self.network.activate(sensor_values);
     }
 }
 
 use vector::AllignedPair;
 
-fn cross_over(mut rng: ThreadRng, organism_1: Organism, organism_2: Organism, fitness_1: usize, fitness_2: usize, n_sensors: usize, n_output: usize) -> Organism {
+fn cross_over(rng: &mut ThreadRng, organism_1: Organism, organism_2: Organism) -> Organism {
     // let gene_pairs: Vec<(Option<&Connection>, Option<&Connection>)> = align_genes(organism_1, organism_2);
     let between = Uniform::from(0.0..1.0);
     let mut choose_gene = |pair: AllignedPair<Connection>| {
-        let r = between.sample(&mut rng);
+        let r = between.sample(rng);
         match pair{
             AllignedPair::HasBoth(left, right) => {
                 if r > 0.5 {
@@ -374,9 +378,9 @@ fn cross_over(mut rng: ThreadRng, organism_1: Organism, organism_2: Organism, fi
                 }
             },
             AllignedPair::HasLeft(left) => {
-                if fitness_1 > fitness_2 {
+                if organism_1.fitness > organism_2.fitness {
                     Some((*left).clone())
-                } else if fitness_1 < fitness_2 {
+                } else if organism_1.fitness < organism_2.fitness {
                     None
                 } else if r > 0.5 {
                     Some((*left).clone())
@@ -385,9 +389,9 @@ fn cross_over(mut rng: ThreadRng, organism_1: Organism, organism_2: Organism, fi
                 }
             },
             AllignedPair::HasRight(right) => {
-                if fitness_1 > fitness_2 {
+                if organism_1.fitness > organism_2.fitness {
                     None
-                } else if fitness_1 < fitness_2 {
+                } else if organism_1.fitness < organism_2.fitness {
                     Some((*right).clone())
                 } else if r > 0.5 {
                     None
@@ -400,62 +404,89 @@ fn cross_over(mut rng: ThreadRng, organism_1: Organism, organism_2: Organism, fi
 
     let get_id = |conn:&Connection| conn.innovation.0;
     let new_genome = 
-        vector::allign(organism_1.network.genome, organism_2.network.genome, &get_id, &mut choose_gene)
+        vector::allign(&organism_1.network.genome, &organism_2.network.genome, &get_id, &mut choose_gene)
         .into_iter().flatten().collect();
         
-    let network = Network::create_from_genome(n_sensors, n_output, new_genome);
+    debug_assert!(organism_1.network.n_output_nodes == organism_2.network.n_output_nodes, "Organisms with mismatching output side cannot be crossed");
+    debug_assert!(organism_1.network.n_sensor_nodes == organism_2.network.n_sensor_nodes, "Organisms with mismatching output side cannot be crossed");
+    let network = Network::create_from_genome(organism_1.network.n_sensor_nodes, organism_1.network.n_output_nodes, new_genome);
     Organism { 
         network,
         fitness: 0
      }
 }
 
-// fn genome_distance(gene_pairs: &Vec<(Option<&Connection>, Option<&Connection>)>, excess_coef: f64, disjoint_coef: f64, weight_diff_coef: f64) -> f64 {
-//     let mut total_weight_diff = 0.;
-//     let mut first_is_excess = false;
-//     let mut excess_count = 0;
-//     let mut disjoint_count = 0;
-//     let mut n1 = 0;
-//     let mut n2 = 0;
+fn genome_distance(organism_1: &Organism, organism_2: &Organism, excess_coef: f64, disjoint_coef: f64, weight_diff_coef: f64) -> f64 {
+    #[derive(PartialEq, PartialOrd)]
+    enum ExcessSide {
+        Left,
+        Right,
+        Neither
+    }
 
-//     for gene_pair in gene_pairs {
-//         match gene_pair {
-//             (Some(conn1), Some(conn2)) => {
-//                 n1 += 1;
-//                 n2 += 1;
-//                 first_is_excess = false;
-//                 total_weight_diff = total_weight_diff + (conn1.weight - conn2.weight).abs();
-//             },
-//             (Some(_), None) if first_is_excess => {
-//                 n1 += 1;
-//                 excess_count += 1;
-//             },
-//             (Some(_), None) => {
-//                 n1 += 1;
-//                 first_is_excess = true;
-//                 disjoint_count = disjoint_count + excess_count;
-//                 excess_count = 1;
-//             },
-//             (None, Some(_)) if first_is_excess => {
-//                 n2 += 1;
-//                 first_is_excess = false;
-//                 disjoint_count = disjoint_count + excess_count;
-//                 excess_count = 1;
-//             },
-//             (None, Some(_)) => {
-//                 n2 += 1;
-//                 excess_count += 1;
-//             },
-//             (None, None) => unreachable!("Unexpected gene pairing")
-//         }
-//     }
+    let mut total_weight_diff = 0.;
+    let mut excess_side = ExcessSide::Neither;
+    let mut excess_count = 0;
+    let mut disjoint_count = 0;
+    let mut n1 = 0;
+    let mut n2 = 0;
 
-//     let n = std::cmp::max(n1, n2) as f64;
-//     let excess_term = excess_coef * (excess_count as f64) / n;
-//     let disjoint_term = disjoint_coef * (disjoint_count as f64) / n;
-//     let weight_term = weight_diff_coef * total_weight_diff / n;
-//     excess_term + disjoint_term + weight_term
-// }
+    let mut increment_counters = |pair: AllignedPair<Connection>| {
+        match pair {
+            AllignedPair::HasBoth(left, right) => {
+                n1 += 1;
+                n2 += 1;
+                excess_side = ExcessSide::Neither;
+                disjoint_count = disjoint_count + excess_count;
+                excess_count = 0;
+                total_weight_diff = total_weight_diff + (left.weight - right.weight).abs();
+            },
+            AllignedPair::HasLeft(_) => {
+                n1 +=1;
+                match excess_side {
+                    ExcessSide::Neither => {
+                        excess_side = ExcessSide::Left;
+                        excess_count = 1;
+                    },
+                    ExcessSide::Right => {
+                        excess_side = ExcessSide::Left;
+                        disjoint_count = disjoint_count + excess_count;
+                        excess_count = 1;
+                    },
+                    ExcessSide::Left => {
+                        excess_count += 1;
+                    }
+                }
+            },
+            AllignedPair::HasRight(_) => {
+                n2 += 1;
+                match excess_side {
+                    ExcessSide::Neither => {
+                        excess_side = ExcessSide::Right;
+                        excess_count = 1;
+                    },
+                    ExcessSide::Right => {
+                        excess_count += 1;
+                    },
+                    ExcessSide::Left => {
+                        excess_side = ExcessSide::Right;
+                        disjoint_count = disjoint_count + excess_count;
+                        excess_count = 1;
+                    }
+                }
+            }
+        }
+    };
+
+    let get_id = |conn:&Connection| conn.innovation.0;
+    vector::allign(&organism_1.network.genome, &organism_2.network.genome, &get_id, &mut increment_counters);
+
+    let n = std::cmp::max(n1, n2) as f64;
+    let excess_term = excess_coef * (excess_count as f64) / n;
+    let disjoint_term = disjoint_coef * (disjoint_count as f64) / n;
+    let weight_term = weight_diff_coef * total_weight_diff / n;
+    excess_term + disjoint_term + weight_term
+}
 
 #[cfg(test)]
 mod tests {
@@ -489,8 +520,8 @@ mod tests {
     }
 
     fn add_node_by_in_out(network: Network, in_id: usize, out_id: usize, new_weight: f64, global_innovation: InnovationNumber) -> (Network, InnovationNumber) {
-        let conn_index = match network.genome.iter().enumerate().find(|(i,x)| x.in_node_id == in_id && x.out_node_id == out_id && x.enabled) {
-            Some((index, conn)) => index,
+        let conn_index = match network.genome.iter().enumerate().find(|(_,x)| x.in_node_id == in_id && x.out_node_id == out_id && x.enabled) {
+            Some((index, _)) => index,
             None => panic!("Cannot add a node to a connection that does not exist")
         };
         let new_conn_index = network.genome.len();
@@ -500,8 +531,8 @@ mod tests {
     }
 
     fn diable_connection_by_in_out(mut network: Network, in_id: usize, out_id: usize) -> Network {
-        let conn_index = match network.genome.iter().enumerate().find(|(i,x)| x.in_node_id == in_id && x.out_node_id == out_id && x.enabled) {
-            Some((index, conn)) => index,
+        let conn_index = match network.genome.iter().enumerate().find(|(_,x)| x.in_node_id == in_id && x.out_node_id == out_id && x.enabled) {
+            Some((index, _)) => index,
             None => panic!("Cannot add a node to a connection that does not exist")
         };
         network.genome[conn_index].enabled = false;
@@ -510,11 +541,11 @@ mod tests {
 
     #[test]
     fn network_creation() {
-        let rng = rand::thread_rng();
+        let mut rng = rand::thread_rng();
         let n_sensors = 3;
         let n_outputs = 2;
         let n_total = n_sensors + n_outputs;
-        let network =  Network::init(rng, n_sensors, n_outputs);
+        let network =  Network::init(&mut rng, n_sensors, n_outputs);
         assert_eq!(network.nodes.len(), n_total);
         assert_eq!(network.n_output_nodes, n_outputs);
         assert_eq!(network.n_sensor_nodes, n_sensors);
@@ -549,9 +580,9 @@ mod tests {
     #[test]
     fn can_add_valid_node(){
         let mut rng = rand::thread_rng();
-        let network = Network::init(rng, 2, 2);
+        let network = Network::init(&mut rng, 2, 2);
         let existing_conn_weight= network.genome[0].weight;
-        let (network, global_innvation) = add_node(network, 0, InnovationNumber(4));
+        let (network, _) = add_node(network, 0, InnovationNumber(4));
 
         assert_eq!(network.genome[0].enabled, false);
         assert_eq!(network.genome[4].in_node_id, 0);
@@ -564,8 +595,8 @@ mod tests {
 
     #[test]
     fn can_add_valid_connection(){
-        let rng = rand::thread_rng();
-        let network = Network::init(rng, 2, 2);
+        let mut rng = rand::thread_rng();
+        let network = Network::init(&mut rng, 2, 2);
         let (network, global_innvation) = add_node(network, 0, InnovationNumber(4));
         let (network, _) = add_connection(network, 1, 4, 0.5, global_innvation);
         assert_eq!(network.nodes[3].input_connection_ids.len(), 2);
@@ -587,13 +618,13 @@ mod tests {
         assert_eq!(network.nodes[4].input_connection_ids.len(), 1);
         let (network, global_innov) = add_node_by_in_out(network, 1, 3, -0.8, global_innov);
         let (network, global_innov) = add_connection(network, 0, 5, 0.6, global_innov);
-        let (network, global_innov) = add_connection(network, 5, 2, 0.4, global_innov);
+        let (mut network, global_innov) = add_connection(network, 5, 2, 0.4, global_innov);
 
         assert_eq!(network.genome.len(), 8);
 
-        let new_network = network.activate(vec![0.5, -0.2]);
-        assert_approx_eq!(new_network.nodes[2].value, 0.184);
-        assert_approx_eq!(new_network.nodes[3].value, 0.);
+        network.activate(vec![0.5, -0.2]);
+        assert_approx_eq!(network.nodes[2].value, 0.184);
+        assert_approx_eq!(network.nodes[3].value, 0.);
         assert_eq!(global_innov.0, 8);
     }
 
@@ -610,61 +641,60 @@ mod tests {
         let network = diable_connection_by_in_out(network, 0, 5);
         let (network, global_innov) = add_connection(network, 0, 4, -0.8, global_innov);
         let (network, global_innov) = add_connection(network, 3, 5, 0.5, global_innov);
-        let (network, global_innov) = add_connection(network, 5, 4, -0.1, global_innov);
+        let (mut network, _) = add_connection(network, 5, 4, -0.1, global_innov);
         
-        let new_network = network.activate(vec![-0.9, 0.6]);
-        let first_output_ix = new_network.n_sensor_nodes;
-        assert_approx_eq!(new_network.nodes[first_output_ix].value, 0.0216);
+        network.activate(vec![-0.9, 0.6]);
+        let first_output_ix = network.n_sensor_nodes;
+        assert_approx_eq!(network.nodes[first_output_ix].value, 0.0216);
     }
 
-    // fn testing_organism_pair() -> (Organism, Organism) {
-    //     //inspired by the crossover example from the original paper by K Stanley
-    //     // let innovation_map:HashMap<(InputNodeId, OutputNodeId), InnovationNumber> = vec![((InputNodeId(0),OutputNodeId(3)),InnovationNumber(0)), ((InputNodeId(1),OutputNodeId(3)),InnovationNumber(1)), ((InputNodeId(2),OutputNodeId(3)),InnovationNumber(2))].into_iter().collect();
+    fn testing_organism_pair() -> (Organism, Organism) {
+        //inspired by the crossover example from the original paper by K Stanley
+        // let innovation_map:HashMap<(InputNodeId, OutputNodeId), InnovationNumber> = vec![((InputNodeId(0),OutputNodeId(3)),InnovationNumber(0)), ((InputNodeId(1),OutputNodeId(3)),InnovationNumber(1)), ((InputNodeId(2),OutputNodeId(3)),InnovationNumber(2))].into_iter().collect();
+        let mut rng = rand::thread_rng();
+        let ancestor = Network::init(&mut rng, 3, 1);
+        let (ancestor, gi) = add_node_by_in_out(ancestor, 1, 3, 0.5, InnovationNumber(3));
 
-    //     let organism_1 = {
-    //         let network = Network::init(3, 1);
-    //         let (network, _) = add_node_by_in_out(network, 1, 3, 0.5, 3);
-    //         let (network, _) = add_connection_by_int(network, 0, 4, 0.5, 7);
-    //         Organism{
-    //             network,
-    //             fitness: 3
-    //         }
-    //     };
+        let (parent2, gi) = add_node_by_in_out(ancestor.clone(), 4, 3, 0.5, gi);
+        let (parent1, gi) = add_connection(ancestor.clone(), 0, 4, 0.5, gi);
+        let (parent2, gi) = add_connection(parent2, 2, 4, 0.5, gi);
+        let (parent2, _) = add_connection(parent2, 0, 5, 0.5, gi);
 
-    //     let organism_2 = {
-    //         let network = Network::init(3, 1);
-    //         let (network, _) = add_node_by_in_out(network, 1, 3, 0.5, 3);
-    //         let (network, _) = add_node_by_in_out(network, 4, 3, 0.5, 5);
-    //         let (network, _) = add_connection_by_int(network, 2, 4, 0.5, 8);
-    //         let (network, _) = add_connection_by_int(network, 0, 5, 0.5, 9);
+        let organism_1 = {
+            Organism{
+                network: parent1,
+                fitness: 3
+            }
+        };
 
-    //         Organism{
-    //             network,
-    //             fitness: 4
-    //         }
-    //     };
-    //     (organism_1, organism_2)
-    // }
-    // #[test]
-    // fn cross_over_works() {
-    //     let (organism_1, organism_2) = testing_organism_pair();
-    //     let gene_pairs: Vec<(Option<&Connection>, Option<&Connection>)> = align_genes(&organism_1, &organism_2);
-    //     let organism_child = cross_over(&gene_pairs, organism_1.fitness, organism_2.fitness, 3, 1);
-    //     assert_eq!(organism_child.network.genome.len(), 9)
-    // }
+        let organism_2 = {
+           Organism{
+                network: parent2,
+                fitness: 4
+            }
+        };
+        (organism_1, organism_2)
+    }
+    #[test]
+    fn cross_over_works() {
+        let mut rng = rand::thread_rng();
+        let (organism_1, organism_2) = testing_organism_pair();
+        let organism_child = cross_over(&mut rng, organism_1, organism_2);
+        assert_eq!(organism_child.network.genome.len(), 9)
+    }
 
-    // #[test]
-    // fn geneic_distance_works() {
-    //     let (organism_1, organism_2) = testing_organism_pair();
-    //     let gene_pairs: Vec<(Option<&Connection>, Option<&Connection>)> = align_genes(&organism_1, &organism_2);
-    //     assert_approx_eq!(genome_distance(&gene_pairs, 1., 0., 0.), 2. / 9.);
-    //     assert_approx_eq!(genome_distance(&gene_pairs, 0., 1., 0.), 3. / 9.);
-    // }
+    #[test]
+    fn genetic_distance_works() {
+        let (organism_1, organism_2) = testing_organism_pair();
+        assert_approx_eq!(genome_distance(&organism_1, &organism_2, 1., 0., 0.), 2. / 9.);
+        assert_approx_eq!(genome_distance(&organism_1, &organism_2, 0., 1., 0.), 3. / 9.);
+    }
 
-    // #[test]
-    // fn large_init(){
-    //     let network = Network::init(9, 10);
-    //     assert_eq!(network.genome[89].innovation_num.0, 89);
-    //     assert_eq!(network.genome.len(), 90);
-    // }
+    #[test]
+    fn large_init(){
+        let mut rng = rand::thread_rng();
+        let network = Network::init(&mut rng, 9, 10);
+        assert_eq!(network.genome[89].innovation.0, 89);
+        assert_eq!(network.genome.len(), 90);
+    }
 }
