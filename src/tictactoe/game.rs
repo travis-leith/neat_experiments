@@ -127,7 +127,7 @@ pub trait Controller {
     fn retry_allowed(&mut self) -> bool;
 }
 
-fn play_one_move(mut ctrl: &mut impl Controller, mut playing_state: PlayingGameState) -> Result<GameState, PlayingGameState> {
+fn play_one_move(ctrl: &mut impl Controller, mut playing_state: PlayingGameState) -> Result<GameState, PlayingGameState> {
     let (player_move, next_player) = match playing_state.player_turn {
         Player::Cross => (ctrl.cross_mover(&playing_state.gameboard), Player::Circle),
         Player::Circle => (ctrl.circle_mover(&playing_state.gameboard), Player::Cross)

@@ -58,12 +58,6 @@ mod vector {
     }
 }
 
-// #[derive(Eq, PartialEq, Hash, PartialOrd, Copy, Clone)]
-// #[derive(Eq, PartialEq, Hash)]
-// pub struct NodeId(usize);
-// pub struct ConnectionId(usize);
-
-
 // #[derive(PartialEq, PartialOrd, Copy, Clone)]
 #[derive(Clone)]
 pub struct InnovationNumber(usize);
@@ -90,7 +84,7 @@ struct Node{
     input_node_ids: HashSet<usize>,
     active_sum: f64,
     // is_output: bool,
-    node_type: NodeType,
+    // node_type: NodeType,
 }
 
 impl Node {
@@ -102,7 +96,7 @@ impl Node {
             input_connection_ids: HashSet::new(),
             input_node_ids: HashSet::new(),
             active_sum: 0.,
-            node_type: node_type
+            // node_type: node_type
         }
     }
 }
@@ -118,6 +112,7 @@ struct Connection {
 
 #[derive(Clone)]
 pub struct Network {
+    has_bias_node: bool,
     genome: Vec<Connection>,
     n_sensor_nodes: usize,
     n_output_nodes: usize,
@@ -134,7 +129,7 @@ fn relu(x: f64) -> f64 {
 
 impl Network {
 
-    fn create_from_genome(n_sensor_nodes: usize, n_output_nodes: usize, genome: Vec<Connection>) -> Network {
+    fn create_from_genome(n_sensor_nodes: usize, n_output_nodes: usize, genome: Vec<Connection>, has_bias_node: bool) -> Network {
         let mut max_node_id = 0;
 
         for conn in genome.iter() {
@@ -163,6 +158,7 @@ impl Network {
         }
         
         Network {
+            has_bias_node,
             n_sensor_nodes,
             n_output_nodes,
             genome,
@@ -171,7 +167,7 @@ impl Network {
 
     }
 
-    pub fn init(rng: &mut ThreadRng, n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
+    pub fn init(rng: &mut ThreadRng, n_sensor_nodes: usize, n_output_nodes: usize, has_bias_node: bool) -> Network {
         let between = Uniform::from(-1.0..1.0);
         let n_total_nodes = n_sensor_nodes + n_output_nodes;
         let mut nodes = Vec::with_capacity(n_total_nodes);
@@ -210,6 +206,7 @@ impl Network {
         }
 
         Network {
+            has_bias_node,
             genome,
             n_sensor_nodes,
             n_output_nodes,
@@ -260,10 +257,12 @@ impl Network {
     }
 
     pub fn activate(&mut self, sensor_values: Vec<f64>) {
-        debug_assert!(sensor_values.len() == self.n_sensor_nodes, "sensor values not the right length for network");
+        let bias_offset = if self.has_bias_node {1} else {0};
+        debug_assert!(sensor_values.len() + bias_offset == self.n_sensor_nodes, "sensor values not the right length for network");
         // set the sensor values
+        self.nodes[0].value = 1.; //TODO this does not need to happen on each activation
         for (i, value) in sensor_values.into_iter().enumerate() {
-            self.nodes[i].value = value;
+            self.nodes[i + bias_offset].value = value;
         }
         
         #[tailcall]
@@ -332,7 +331,7 @@ fn add_node(mut network: Network, existing_conn_index: usize, global_innovation:
         is_active: false,
         active_sum: 0.,
         value: 0.,
-        node_type: NodeType::Hidden
+        // node_type: NodeType::Hidden
     };
 
     existing_conn.enabled = false;
@@ -348,13 +347,13 @@ fn add_node(mut network: Network, existing_conn_index: usize, global_innovation:
 }
 
 pub struct Organism {
-    network: Network,
-    fitness: usize // consider changing to generic type
+    pub network: Network,
+    pub fitness: i32 // consider changing to generic type
 }
 
 impl Organism {
-    pub fn init(rng: &mut ThreadRng , n_sensor_nodes: usize, n_output_nodes: usize) -> Organism {
-        Organism { network: Network::init(rng, n_sensor_nodes, n_output_nodes), fitness: 0 }
+    pub fn init(rng: &mut ThreadRng , n_sensor_nodes: usize, n_output_nodes: usize, has_bias_node: bool) -> Organism {
+        Organism { network: Network::init(rng, n_sensor_nodes, n_output_nodes, has_bias_node), fitness: 0 }
     }
 
     pub fn activate(&mut self, sensor_values: Vec<f64>) {
@@ -407,9 +406,10 @@ fn cross_over(rng: &mut ThreadRng, organism_1: Organism, organism_2: Organism) -
         vector::allign(&organism_1.network.genome, &organism_2.network.genome, &get_id, &mut choose_gene)
         .into_iter().flatten().collect();
         
-    debug_assert!(organism_1.network.n_output_nodes == organism_2.network.n_output_nodes, "Organisms with mismatching output side cannot be crossed");
-    debug_assert!(organism_1.network.n_sensor_nodes == organism_2.network.n_sensor_nodes, "Organisms with mismatching output side cannot be crossed");
-    let network = Network::create_from_genome(organism_1.network.n_sensor_nodes, organism_1.network.n_output_nodes, new_genome);
+    debug_assert!(organism_1.network.n_output_nodes == organism_2.network.n_output_nodes, "Organisms with mismatching output size cannot be crossed");
+    debug_assert!(organism_1.network.n_sensor_nodes == organism_2.network.n_sensor_nodes, "Organisms with mismatching input size cannot be crossed");
+    debug_assert!(organism_1.network.has_bias_node == organism_2.network.has_bias_node, "Organisms with mismatching input size cannot be crossed");
+    let network = Network::create_from_genome(organism_1.network.n_sensor_nodes, organism_1.network.n_output_nodes, new_genome, organism_1.network.has_bias_node);
     Organism { 
         network,
         fitness: 0
@@ -511,6 +511,7 @@ mod tests {
             }
             
             Network {
+                has_bias_node: false,
                 genome: Vec::new(),
                 n_sensor_nodes,
                 n_output_nodes,
@@ -545,7 +546,7 @@ mod tests {
         let n_sensors = 3;
         let n_outputs = 2;
         let n_total = n_sensors + n_outputs;
-        let network =  Network::init(&mut rng, n_sensors, n_outputs);
+        let network =  Network::init(&mut rng, n_sensors, n_outputs, false);
         assert_eq!(network.nodes.len(), n_total);
         assert_eq!(network.n_output_nodes, n_outputs);
         assert_eq!(network.n_sensor_nodes, n_sensors);
@@ -580,7 +581,7 @@ mod tests {
     #[test]
     fn can_add_valid_node(){
         let mut rng = rand::thread_rng();
-        let network = Network::init(&mut rng, 2, 2);
+        let network = Network::init(&mut rng, 2, 2, false);
         let existing_conn_weight= network.genome[0].weight;
         let (network, _) = add_node(network, 0, InnovationNumber(4));
 
@@ -596,7 +597,7 @@ mod tests {
     #[test]
     fn can_add_valid_connection(){
         let mut rng = rand::thread_rng();
-        let network = Network::init(&mut rng, 2, 2);
+        let network = Network::init(&mut rng, 2, 2, false);
         let (network, global_innvation) = add_node(network, 0, InnovationNumber(4));
         let (network, _) = add_connection(network, 1, 4, 0.5, global_innvation);
         assert_eq!(network.nodes[3].input_connection_ids.len(), 2);
@@ -652,7 +653,7 @@ mod tests {
         //inspired by the crossover example from the original paper by K Stanley
         // let innovation_map:HashMap<(InputNodeId, OutputNodeId), InnovationNumber> = vec![((InputNodeId(0),OutputNodeId(3)),InnovationNumber(0)), ((InputNodeId(1),OutputNodeId(3)),InnovationNumber(1)), ((InputNodeId(2),OutputNodeId(3)),InnovationNumber(2))].into_iter().collect();
         let mut rng = rand::thread_rng();
-        let ancestor = Network::init(&mut rng, 3, 1);
+        let ancestor = Network::init(&mut rng, 3, 1, false);
         let (ancestor, gi) = add_node_by_in_out(ancestor, 1, 3, 0.5, InnovationNumber(3));
 
         let (parent2, gi) = add_node_by_in_out(ancestor.clone(), 4, 3, 0.5, gi);
@@ -693,7 +694,7 @@ mod tests {
     #[test]
     fn large_init(){
         let mut rng = rand::thread_rng();
-        let network = Network::init(&mut rng, 9, 10);
+        let network = Network::init(&mut rng, 9, 10, false);
         assert_eq!(network.genome[89].innovation.0, 89);
         assert_eq!(network.genome.len(), 90);
     }
