@@ -416,7 +416,7 @@ fn cross_over(rng: &mut ThreadRng, organism_1: Organism, organism_2: Organism) -
      }
 }
 
-fn genome_distance(organism_1: &Organism, organism_2: &Organism, excess_coef: f64, disjoint_coef: f64, weight_diff_coef: f64) -> f64 {
+pub fn genome_distance(organism_1: &Organism, organism_2: &Organism, excess_coef: f64, disjoint_coef: f64, weight_diff_coef: f64) -> f64 {
     #[derive(PartialEq, PartialOrd)]
     enum ExcessSide {
         Left,
