@@ -9,6 +9,7 @@ use itertools::Itertools;
 
 use rayon::prelude::*;
 use tailcall::tailcall;
+use rand::seq::SliceRandom;
 
 impl Cell {
     fn as_f64(self) -> f64 {
@@ -172,21 +173,15 @@ fn species_loop<'a>(mut acc:Vec<Species<'a>>, species_ix: usize, org:&'a Organis
 }
 
 #[tailcall]
-fn genome_loop<'a>(mut acc:Vec<Species<'a>>, orgs:Vec<&'a Organism>, orgs_ix: usize, delta_t: f64) -> Vec<Species<'a>> {
+fn genome_loop<'a>(mut acc:Vec<Species<'a>>, orgs:&'a Vec<Organism>, orgs_ix: usize, delta_t: f64) -> Vec<Species<'a>> {
     if orgs_ix < orgs.len() {
-        acc = species_loop(acc, 0, orgs[orgs_ix], delta_t);
+        acc = species_loop(acc, 0, &orgs[orgs_ix], delta_t);
         genome_loop(acc, orgs, orgs_ix + 1, delta_t)
     } else {
         acc
     }
 }
 
-struct DistSummary{
-    min: f64,
-    max: f64,
-    mean: f64,
-    std_dev: f64
-}
 fn get_distance_stats(orgs: &Vec<Organism>) -> (f64, f64, f64) {
     let n = orgs.len();
     let get_min = |a:f64, b:f64| if a < b {a} else {b};
@@ -194,48 +189,64 @@ fn get_distance_stats(orgs: &Vec<Organism>) -> (f64, f64, f64) {
     let (min, max, mean_numer) = 
         orgs.iter().tuple_combinations().par_bridge().map(|(org1, org2)|{
             genome_distance(org1, org2, 1., 1., 1.)
-        }).fold(||(0., 0., 0.), |(mn, mx, num), d| {
+        }).fold(||(1., 0., 0.), |(mn, mx, num), d| {
             (get_min(mn, d), get_max(mx, d), num + d)
-        }).reduce(|| (0., 0., 0.), |(a1, a2, a3),(b1, b2, b3)|{
+        }).reduce(|| (1., 0., 0.), |(a1, a2, a3),(b1, b2, b3)|{
             (get_min(a1, b1), get_max(a2, b2), a3 + b3)
         })
         ;
-    // orgs.iter().tuple_combinations().par_bridge().for_each(|(org1, org2)|{
-    //     let d = genome_distance(org1, org2, 1., 1., 1.);
-    //     if d < min {
-    //         min = d;
-    //     }
 
-    //     if d > max {
-    //         max = d;
-    //     }
-
-    //     mean_numer += d;
-    // });
-    // for (org1, org2) in orgs.iter().tuple_combinations().par_bridge().into_par_iter() {
-    //     let d = genome_distance(org1, org2, 1., 1., 1.);
-    //     if d < min {
-    //         min = d;
-    //     }
-
-    //     if d > max {
-    //         max = d;
-    //     }
-
-    //     mean_numer += d;
-    // }
     let m = (n * (n - 1) / 2) as f64;
     (min, max, mean_numer / m)
 }
 
 fn main() {
     let mut rng = rand::thread_rng();
-    let mut all_orgs:Vec<Organism> = (0 .. 24000).map(|_| Organism::init(&mut rng, 10, 9, true)).collect();
+    let mut all_orgs:Vec<Organism> = (0 .. 2400).map(|_| Organism::init(&mut rng, 10, 9, true)).collect();
     
-    let (min, max, mean) = get_distance_stats(&all_orgs);
-    println!("min: {min}; max: {max}; mean: {mean}");
+    // let (min, max, mean) = get_distance_stats(&all_orgs);
+    // println!("min: {min}; max: {max}; mean: {mean}");
 
-    // all_orgs.par_chunks_mut(240).for_each(|chunk: &mut [Organism]|{
+    let species = genome_loop(Vec::new(), &all_orgs, 0, 0.7);
+
+    for (i, s) in species.iter().enumerate() {
+        let n = s.members.len();
+        println!("species {i} has {n} members");
+    }
+
+
+    // let mut random_index: Vec<usize> = (0 .. species.len()).collect();
+    // random_index.shuffle(&mut rng);
+
+    // random_index.par_chunks(48).for_each(|chunk| {
+    //     chunk.iter().tuple_combinations().for_each(|(i1, i2)| {
+    //         let org1 = &mut all_orgs[*i1];
+    //         let org2 = &mut all_orgs[*i2];
+    //         single_match_up(org1, org2)
+    //     })
+    // });
+    let mut org_refs = all_orgs.iter_mut().collect_vec();
+    org_refs.shuffle(&mut rng);
+
+    org_refs.par_chunks_mut(48).for_each(|chunk| {
+        for i in 0 .. chunk.len() {
+            let (left, others) = chunk.split_at_mut(i);
+            let (middle, right) = others.split_at_mut(1);
+            let org1 = &mut middle[0];
+            //process left
+            for org2 in left {
+                single_match_up(org1, org2);
+            }
+            //process right
+            for org2 in right {
+                single_match_up(org1, org2);
+            }
+        }
+    });
+
+    
+
+    // all_orgs.par_chunks_mut(48).for_each(|chunk: &mut [Organism]|{
     //     for i in 0 .. chunk.len() {
     //         let (left, others) = chunk.split_at_mut(i);
     //         let (middle, right) = others.split_at_mut(1);
@@ -251,10 +262,25 @@ fn main() {
     //     }
     // });
 
-    // let best_ai = all_orgs.iter().max_by_key(|o|o.fitness).unwrap();
-    // println!("best fitness: {}", best_ai.fitness);
-    // // let simple_ai = Network::init(&mut rng, 9, 9);
+    let best_ai = all_orgs.iter().max_by_key(|o|o.fitness).unwrap();
+    println!("best fitness: {}", best_ai.fitness);
+    // let simple_ai = Network::init(&mut rng, 9, 9);
     // let mut ai_controller = InitNetworkAiVsUser {network:best_ai.network.clone()};
 
     // game_loop(&mut ai_controller);
+
+    let n = 10; // Replace 10 with your desired number
+
+    // Create a vector of integers from 0 to n-1
+    let mut numbers: Vec<usize> = (0..n).collect();
+
+    // Use thread_rng() to get a random number generator
+    let mut rng = rand::thread_rng();
+
+    println!("{:?}", numbers);
+    // Shuffle the vector using the Fisher-Yates algorithm
+    numbers.shuffle(&mut rng);
+
+    // Print the shuffled vector
+    println!("{:?}", numbers);
 }

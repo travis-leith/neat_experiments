@@ -215,31 +215,31 @@ impl Network {
     }
 
     fn activation_pulse(&mut self) -> bool {
-        // let nodes = &mut self.nodes[..];
-        // for i in self.n_sensor_nodes..nodes.len() {
-        //     nodes[i].has_active_inputs = false;
-        //     nodes[i].active_sum = 0.;
+        let nodes = &mut self.nodes[..];
+        for i in self.n_sensor_nodes..nodes.len() {
+            nodes[i].has_active_inputs = false;
+            nodes[i].active_sum = 0.;
 
-        //     for i_conn in &nodes[i].input_connection_ids {
-        //         let conn = &self.genome[*i_conn];
-        //         let in_node = conn.in_node_id;
-        //         if nodes[in_node].is_active && conn.enabled {
-        //             let to_add = conn.weight * nodes[in_node].value;
-        //             nodes[i].has_active_inputs = true;
-        //             nodes[i].active_sum += to_add;
-        //         }
-        //     }
-        // }
-        
-        for conn in self.genome.iter() {
-            let in_node = &self.nodes[conn.in_node_id];
-            if in_node.is_active && conn.enabled {
-				let to_add = conn.weight * in_node.value;
-				let out_node = &mut self.nodes[conn.out_node_id]; // here (node_ix)
-				out_node.has_active_inputs = true;
-				out_node.active_sum += to_add;
-			}
+            for i_conn in &nodes[i].input_connection_ids {
+                let conn = &self.genome[*i_conn];
+                let in_node = conn.in_node_id;
+                if nodes[in_node].is_active && conn.enabled {
+                    let to_add = conn.weight * nodes[in_node].value;
+                    nodes[i].has_active_inputs = true;
+                    nodes[i].active_sum += to_add;
+                }
+            }
         }
+        
+        // for conn in self.genome.iter() {
+        //     let in_node = &self.nodes[conn.in_node_id];
+        //     if in_node.is_active && conn.enabled {
+		// 		let to_add = conn.weight * in_node.value;
+		// 		let out_node = &mut self.nodes[conn.out_node_id];
+		// 		out_node.has_active_inputs = true;
+		// 		out_node.active_sum += to_add;
+		// 	}
+        // }
 
         let mut all_active = true;
 
