@@ -102,10 +102,10 @@ impl Node {
 }
 
 #[derive(Clone)]
-struct Connection {
+pub struct Connection {
     in_node_id: usize,
     out_node_id: usize,
-    weight: f64,
+    pub weight: f64,
     innovation: InnovationNumber,
     enabled: bool
 }
@@ -113,7 +113,7 @@ struct Connection {
 #[derive(Clone)]
 pub struct Network {
     has_bias_node: bool,
-    genome: Vec<Connection>,
+    pub genome: Vec<Connection>,
     n_sensor_nodes: usize,
     n_output_nodes: usize,
     nodes: Vec<Node>,
@@ -346,14 +346,15 @@ fn add_node(mut network: Network, existing_conn_index: usize, global_innovation:
 
 }
 
+#[derive(Clone)]
 pub struct Organism {
     pub network: Network,
-    pub fitness: i32 // consider changing to generic type
+    pub fitness: f64 // consider changing to generic type
 }
 
 impl Organism {
     pub fn init(rng: &mut ThreadRng , n_sensor_nodes: usize, n_output_nodes: usize, has_bias_node: bool) -> Organism {
-        Organism { network: Network::init(rng, n_sensor_nodes, n_output_nodes, has_bias_node), fitness: 0 }
+        Organism { network: Network::init(rng, n_sensor_nodes, n_output_nodes, has_bias_node), fitness: 0. }
     }
 
     pub fn activate(&mut self, sensor_values: Vec<f64>) {
@@ -363,7 +364,7 @@ impl Organism {
 
 use vector::AllignedPair;
 
-fn cross_over(rng: &mut ThreadRng, organism_1: Organism, organism_2: Organism) -> Organism {
+pub fn cross_over(rng: &mut ThreadRng, organism_1: &Organism, organism_2: &Organism) -> Organism {
     // let gene_pairs: Vec<(Option<&Connection>, Option<&Connection>)> = align_genes(organism_1, organism_2);
     let between = Uniform::from(0.0..1.0);
     let mut choose_gene = |pair: AllignedPair<Connection>| {
@@ -412,7 +413,7 @@ fn cross_over(rng: &mut ThreadRng, organism_1: Organism, organism_2: Organism) -
     let network = Network::create_from_genome(organism_1.network.n_sensor_nodes, organism_1.network.n_output_nodes, new_genome, organism_1.network.has_bias_node);
     Organism { 
         network,
-        fitness: 0
+        fitness: 0.
      }
 }
 
@@ -664,14 +665,14 @@ mod tests {
         let organism_1 = {
             Organism{
                 network: parent1,
-                fitness: 3
+                fitness: 3.
             }
         };
 
         let organism_2 = {
            Organism{
                 network: parent2,
-                fitness: 4
+                fitness: 4.
             }
         };
         (organism_1, organism_2)
@@ -680,7 +681,7 @@ mod tests {
     fn cross_over_works() {
         let mut rng = rand::thread_rng();
         let (organism_1, organism_2) = testing_organism_pair();
-        let organism_child = cross_over(&mut rng, organism_1, organism_2);
+        let organism_child = cross_over(&mut rng, &organism_1, &organism_2);
         assert_eq!(organism_child.network.genome.len(), 9)
     }
 

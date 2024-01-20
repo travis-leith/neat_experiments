@@ -1,3 +1,4 @@
+#![feature(get_many_mut)]
 mod tictactoe;
 mod neat;
 
@@ -6,6 +7,7 @@ use crate::tictactoe::cli::get_user_move;
 use crate::neat::common::*;
 use crate::tictactoe::game::*;
 use itertools::Itertools;
+use rand_distr::{Normal, Distribution, Uniform};
 
 use rayon::prelude::*;
 use tailcall::tailcall;
@@ -82,7 +84,6 @@ impl Controller for RandomAiVsUser {
     }
 }
 
-
 struct NeatVsNeat<'a> {
     pub cross: &'a mut Organism,
     pub circle: &'a mut Organism
@@ -117,24 +118,24 @@ fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
                 GameOverState::Won(player) => {
                     match player {
                         Player::Circle => {
-                            ctrl.circle.fitness += 1;
-                            ctrl.cross.fitness -= 1;
+                            ctrl.circle.fitness += 1.;
+                            ctrl.cross.fitness -= 1.;
                         },
                         Player::Cross => {
-                            ctrl.circle.fitness -= 1;
-                            ctrl.cross.fitness += 1;
+                            ctrl.circle.fitness -= 1.;
+                            ctrl.cross.fitness += 1.;
                         }
                     }
                 },
                 GameOverState::Disqualified(player,_) => {
                     match player {
                         Player::Circle => {
-                            ctrl.circle.fitness -= 1;
-                            ctrl.cross.fitness += 1;
+                            ctrl.circle.fitness -= 1.;
+                            ctrl.cross.fitness += 1.;
                         },
                         Player::Cross => {
-                            ctrl.circle.fitness += 1;
-                            ctrl.cross.fitness -= 1;
+                            ctrl.circle.fitness += 1.;
+                            ctrl.cross.fitness -= 1.;
                         }
                     }
                 }
@@ -144,28 +145,34 @@ fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
     }
 }
 
-struct Species<'a> {
-    members: Vec<&'a Organism>,
-    representatve: &'a Organism
+struct Species {
+    members: Vec<usize>,
+    representatve: Organism //TODO change to Vec<Connection>
 }
 
-
+struct EvaluatedSpecies<'a> {
+    species: &'a Species,
+    champion: usize,
+    avg_fitness: f64
+}
 
 #[tailcall]
-fn species_loop<'a>(mut acc:Vec<Species<'a>>, species_ix: usize, org:&'a Organism, delta_t: f64) -> Vec<Species<'a>> {
+fn species_loop<'a>(mut acc:Vec<Species>, all_orgs: &Vec<Organism>, species_ix: usize, org_ix:usize, delta_t: f64) -> Vec<Species> {
     if species_ix < acc.len() {
         let this_species = &mut acc[species_ix];
-        let distance = genome_distance(org, this_species.representatve, 1., 1., 1.);
+        let this_org = &all_orgs[org_ix];
+
+        let distance = genome_distance(this_org, &this_species.representatve, 1., 1., 1.);
         if distance < delta_t {
-            this_species.members.push(org);
+            this_species.members.push(org_ix);
             acc
         } else {
-            species_loop(acc, species_ix + 1, org, delta_t)
+            species_loop(acc, all_orgs, species_ix + 1, org_ix, delta_t)
         }
     } else {
         let new_species = Species{
-            members: vec![org],
-            representatve: org
+            members: vec![org_ix],
+            representatve: all_orgs[org_ix].clone()
         };
         acc.push(new_species);
         acc
@@ -173,9 +180,9 @@ fn species_loop<'a>(mut acc:Vec<Species<'a>>, species_ix: usize, org:&'a Organis
 }
 
 #[tailcall]
-fn genome_loop<'a>(mut acc:Vec<Species<'a>>, orgs:&'a Vec<Organism>, orgs_ix: usize, delta_t: f64) -> Vec<Species<'a>> {
+fn genome_loop(mut acc:Vec<Species>, orgs:&Vec<Organism>, orgs_ix: usize, delta_t: f64) -> Vec<Species> {
     if orgs_ix < orgs.len() {
-        acc = species_loop(acc, 0, &orgs[orgs_ix], delta_t);
+        acc = species_loop(acc, orgs, 0, orgs_ix, delta_t);
         genome_loop(acc, orgs, orgs_ix + 1, delta_t)
     } else {
         acc
@@ -201,34 +208,21 @@ fn get_distance_stats(orgs: &Vec<Organism>) -> (f64, f64, f64) {
 }
 
 fn main() {
+    let pop_size = 2400;
     let mut rng = rand::thread_rng();
-    let mut all_orgs:Vec<Organism> = (0 .. 2400).map(|_| Organism::init(&mut rng, 10, 9, true)).collect();
-    
-    // let (min, max, mean) = get_distance_stats(&all_orgs);
-    // println!("min: {min}; max: {max}; mean: {mean}");
+    let mut all_orgs = (0 .. pop_size).map(|_| Organism::init(&mut rng, 10, 9, true)).collect_vec();
+    all_orgs.shuffle(&mut rng);
+    // // let (min, max, mean) = get_distance_stats(&all_orgs);
+    // // println!("min: {min}; max: {max}; mean: {mean}");
 
-    let species = genome_loop(Vec::new(), &all_orgs, 0, 0.7);
+    let mut species = genome_loop(Vec::new(), &mut all_orgs, 0, 0.7);
 
     for (i, s) in species.iter().enumerate() {
         let n = s.members.len();
-        println!("species {i} has {n} members");
+        println!("round 1 species {i} has {n} members");
     }
 
-
-    // let mut random_index: Vec<usize> = (0 .. species.len()).collect();
-    // random_index.shuffle(&mut rng);
-
-    // random_index.par_chunks(48).for_each(|chunk| {
-    //     chunk.iter().tuple_combinations().for_each(|(i1, i2)| {
-    //         let org1 = &mut all_orgs[*i1];
-    //         let org2 = &mut all_orgs[*i2];
-    //         single_match_up(org1, org2)
-    //     })
-    // });
-    let mut org_refs = all_orgs.iter_mut().collect_vec();
-    org_refs.shuffle(&mut rng);
-
-    org_refs.par_chunks_mut(48).for_each(|chunk| {
+    all_orgs.par_chunks_mut(48).for_each(|chunk| {
         for i in 0 .. chunk.len() {
             let (left, others) = chunk.split_at_mut(i);
             let (middle, right) = others.split_at_mut(1);
@@ -244,43 +238,98 @@ fn main() {
         }
     });
 
-    
+    let mut total_fitness = 0.;
 
-    // all_orgs.par_chunks_mut(48).for_each(|chunk: &mut [Organism]|{
-    //     for i in 0 .. chunk.len() {
-    //         let (left, others) = chunk.split_at_mut(i);
-    //         let (middle, right) = others.split_at_mut(1);
-    //         let org1 = &mut middle[0];
-    //         //process left
-    //         for org2 in left {
-    //             single_match_up(org1, org2);
-    //         }
-    //         //process right
-    //         for org2 in right {
-    //             single_match_up(org1, org2);
-    //         }
-    //     }
-    // });
+    let mut evaluated_species: Vec<EvaluatedSpecies> = Vec::with_capacity(species.len());
 
-    let best_ai = all_orgs.iter().max_by_key(|o|o.fitness).unwrap();
+    for s in species.iter() {
+        let mut champ_fitness = 0.;
+        let mut champion = 0;
+        let mut avg_fitness = 0.;
+
+        for i in s.members.iter() {
+            let org = &mut all_orgs[*i];
+            avg_fitness += org.fitness;
+            if org.fitness > champ_fitness {
+                champ_fitness = org.fitness;
+                champion = *i;
+            }
+        }
+        let n = s.members.len() as f64;
+        avg_fitness = avg_fitness / n;
+        total_fitness += avg_fitness;
+
+        let es = EvaluatedSpecies{
+            species: s,
+            champion,
+            avg_fitness
+        };
+        evaluated_species.push(es);
+    };
+
+    let mut new_organisms:Vec<Organism> = Vec::with_capacity(pop_size + evaluated_species.len());
+    for s in evaluated_species {
+        let n_offspring = (s.avg_fitness / total_fitness * (pop_size as f64)) as usize;
+        // choose parents
+        let n_parents = std::cmp::min(n_offspring * 2, s.species.members.len());
+        let parents = &s.species.members[0 .. n_parents];
+
+        //generate offspring by cross_over and mutation
+        for _ in (0 .. n_offspring) {
+            let p1 = parents.choose(&mut rng).unwrap_or(&s.champion);
+            let p2 = parents.choose(&mut rng).unwrap_or(&s.champion);
+
+            let mut new_org = cross_over(&mut rng, &all_orgs[*p1], &all_orgs[*p2]);
+            let between = Uniform::from(0.0..1.0);
+            let normal = Normal::new(1., 0.05).unwrap();
+            for i_conn in (0 .. new_org.network.genome.len()) {
+                let r_unif = between.sample(&mut rng);
+                if r_unif > 0.5 {
+                    let r_normal = normal.sample(&mut rng);
+                    new_org.network.genome[i_conn].weight *= r_normal;
+                }
+            }
+            new_organisms.push(new_org);
+        }
+        let champion = all_orgs[s.champion].clone();
+        new_organisms.push(champion)
+    }
+
+    new_organisms.shuffle(&mut rng);
+
+    for s in species.iter_mut() {
+        s.members.clear()
+    }
+
+    let new_species = genome_loop(species, &mut all_orgs, 0, 0.7);
+
+    for (i, s) in new_species.iter().enumerate() {
+        let n = s.members.len();
+        println!("round 2 species {i} has {n} members");
+    }
+
+    new_organisms.par_chunks_mut(48).for_each(|chunk| {
+        for i in 0 .. chunk.len() {
+            let (left, others) = chunk.split_at_mut(i);
+            let (middle, right) = others.split_at_mut(1);
+            let org1 = &mut middle[0];
+            //process left
+            for org2 in left {
+                single_match_up(org1, org2);
+            }
+            //process right
+            for org2 in right {
+                single_match_up(org1, org2);
+            }
+        }
+    });
+
+    let best_ai = new_organisms.iter().max_by(|a, b| a.fitness.total_cmp(&b.fitness)).unwrap();
     println!("best fitness: {}", best_ai.fitness);
     // let simple_ai = Network::init(&mut rng, 9, 9);
-    // let mut ai_controller = InitNetworkAiVsUser {network:best_ai.network.clone()};
+    let mut ai_controller = InitNetworkAiVsUser {network:best_ai.network.clone()};
 
-    // game_loop(&mut ai_controller);
+    game_loop(&mut ai_controller);
 
-    let n = 10; // Replace 10 with your desired number
-
-    // Create a vector of integers from 0 to n-1
-    let mut numbers: Vec<usize> = (0..n).collect();
-
-    // Use thread_rng() to get a random number generator
-    let mut rng = rand::thread_rng();
-
-    println!("{:?}", numbers);
-    // Shuffle the vector using the Fisher-Yates algorithm
-    numbers.shuffle(&mut rng);
-
-    // Print the shuffled vector
-    println!("{:?}", numbers);
+   
 }
