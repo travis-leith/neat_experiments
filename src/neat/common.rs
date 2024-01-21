@@ -1,4 +1,3 @@
-use tailcall::tailcall;
 use rand::{distributions::{Distribution, Uniform}, rngs::ThreadRng};
 use std::collections::HashSet;
 
@@ -244,7 +243,7 @@ impl Network {
         let mut all_active = true;
 
         for i_node in self.n_sensor_nodes .. self.nodes.len() {
-            let mut node = &mut self.nodes[i_node];
+            let node = &mut self.nodes[i_node];
             node.value = relu(node.active_sum);
             if node.has_active_inputs {
                 node.is_active = true;
@@ -265,20 +264,33 @@ impl Network {
             self.nodes[i + bias_offset].value = value;
         }
         
-        #[tailcall]
-        fn activate_inner(network: &mut Network, remaining_iterations: usize) {
+        let mut remaining_iterations = 20;
+        loop {
             if remaining_iterations == 0 {
                 panic!("Too many iterations :(")
             } else {
-                let all_activated = network.activation_pulse();
+                let all_activated = self.activation_pulse();
                 if all_activated {
-                    // new_network
+                    break
                 } else {
-                    activate_inner(network, remaining_iterations - 1)
+                    remaining_iterations -= 1;
                 }
             }
-        }
-        activate_inner(self, 20)        
+        }   
+        // #[tailcall]
+        // fn activate_inner(network: &mut Network, remaining_iterations: usize) {
+        //     if remaining_iterations == 0 {
+        //         panic!("Too many iterations :(")
+        //     } else {
+        //         let all_activated = network.activation_pulse();
+        //         if all_activated {
+        //             // new_network
+        //         } else {
+        //             activate_inner(network, remaining_iterations - 1)
+        //         }
+        //     }
+        // }
+        // activate_inner(self, 20)        
     }
 
     pub fn get_output(&self) -> Vec<f64> {
@@ -319,7 +331,7 @@ fn add_node(mut network: Network, existing_conn_index: usize, global_innovation:
 
     let genome = &mut network.genome[..];
     let nodes = &mut network.nodes[..];
-    let mut existing_conn = &mut genome[existing_conn_index];
+    let existing_conn = &mut genome[existing_conn_index];
     debug_assert!(existing_conn.enabled, "Tried to add a node to a disabled connection");
     let new_node_id = nodes.len();
     let output_node = &mut nodes[existing_conn.out_node_id];

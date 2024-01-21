@@ -1,5 +1,3 @@
-use tailcall::tailcall;
-
 #[derive(PartialEq, Copy, Clone)]
 pub enum Player {
     Cross,
