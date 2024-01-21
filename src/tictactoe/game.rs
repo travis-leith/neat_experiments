@@ -148,11 +148,24 @@ fn play_one_move(ctrl: &mut impl Controller, mut playing_state: PlayingGameState
     }
 }
 
-#[tailcall]
-pub fn play_game(ctrl: &mut impl Controller, playing_state: PlayingGameState) -> Result<(GameBoard, GameOverState), PlayingGameState> {
-    match play_one_move(ctrl, playing_state) {
-        Ok(GameState::Playing(new_playing_state)) => play_game(ctrl, new_playing_state),
-        Ok(GameState::GameOver(gameboard, game_over_state)) => Ok((gameboard, game_over_state)),
-        Err(new_playing_state) => Err(new_playing_state)
+// #[tailcall]
+// pub fn play_game(ctrl: &mut impl Controller, playing_state: PlayingGameState) -> Result<(GameBoard, GameOverState), PlayingGameState> {
+//     match play_one_move(ctrl, playing_state) {
+//         Ok(GameState::Playing(new_playing_state)) => play_game(ctrl, new_playing_state),
+//         Ok(GameState::GameOver(gameboard, game_over_state)) => Ok((gameboard, game_over_state)),
+//         Err(new_playing_state) => Err(new_playing_state)
+//     }
+// }
+
+//play_game takes a playing_state so that games can be resumable mid play
+pub fn play_game(ctrl: &mut impl Controller, mut playing_state: PlayingGameState) -> Result<(GameBoard, GameOverState), PlayingGameState> {
+    loop {
+        match play_one_move(ctrl, playing_state) {
+            Ok(GameState::Playing(new_playing_state)) => {
+                playing_state = new_playing_state;
+            },
+            Ok(GameState::GameOver(gameboard, game_over_state)) => return Ok((gameboard, game_over_state)),
+            Err(new_playing_state) => return Err(new_playing_state)
+        }
     }
 }

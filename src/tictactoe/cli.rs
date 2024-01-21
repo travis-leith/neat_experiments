@@ -127,19 +127,14 @@ fn end_game(gameboard: &GameBoard, game_over_state: &GameOverState) {
     }
 }
 
-// #[tailcall]
 fn single_game_loop(ctrl: &mut impl Controller, mut playing_state: PlayingGameState) -> (GameBoard, GameOverState) {
-    // let mut keep_going = true;
-
     loop {
-        // keep_going = false;
         match play_game( ctrl, playing_state) {
             Ok(game_over_state) => 
                 break game_over_state,
             Err(new_playing_state) => {
                 println!("you have entered an invalid move. Try again ...");
                 playing_state = new_playing_state;
-                // single_game_loop(new_playing_state)
             }
         }
     }

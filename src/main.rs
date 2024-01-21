@@ -10,7 +10,6 @@ use itertools::Itertools;
 use rand_distr::{Normal, Distribution, Uniform};
 
 use rayon::prelude::*;
-use tailcall::tailcall;
 use rand::seq::SliceRandom;
 
 impl Cell {
@@ -255,7 +254,7 @@ fn main() {
             let mut new_org = cross_over(&mut rng, p1, p2);
             let between = Uniform::from(0.0..1.0);
             let normal = Normal::new(1., 0.05).unwrap();
-            for i_conn in (0 .. new_org.network.genome.len()) {
+            for i_conn in 0 .. new_org.network.genome.len() {
                 let r_unif = between.sample(&mut rng);
                 if r_unif > 0.5 {
                     let r_normal = normal.sample(&mut rng);
