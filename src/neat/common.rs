@@ -417,7 +417,7 @@ pub fn cross_over(rng: &mut ThreadRng, organism_1: &Organism, organism_2: &Organ
      }
 }
 
-pub fn genome_distance(organism_1: &Organism, organism_2: &Organism, excess_coef: f64, disjoint_coef: f64, weight_diff_coef: f64) -> f64 {
+pub fn genome_distance(genome_1: &Vec<Connection>, genome_2: &Vec<Connection>, excess_coef: f64, disjoint_coef: f64, weight_diff_coef: f64) -> f64 {
     #[derive(PartialEq, PartialOrd)]
     enum ExcessSide {
         Left,
@@ -480,7 +480,7 @@ pub fn genome_distance(organism_1: &Organism, organism_2: &Organism, excess_coef
     };
 
     let get_id = |conn:&Connection| conn.innovation.0;
-    vector::allign(&organism_1.network.genome, &organism_2.network.genome, &get_id, &mut increment_counters);
+    vector::allign(genome_1, &genome_2, &get_id, &mut increment_counters);
 
     let n = std::cmp::max(n1, n2) as f64;
     let excess_term = excess_coef * (excess_count as f64) / n;
@@ -688,8 +688,8 @@ mod tests {
     #[test]
     fn genetic_distance_works() {
         let (organism_1, organism_2) = testing_organism_pair();
-        assert_approx_eq!(genome_distance(&organism_1, &organism_2, 1., 0., 0.), 2. / 9.);
-        assert_approx_eq!(genome_distance(&organism_1, &organism_2, 0., 1., 0.), 3. / 9.);
+        assert_approx_eq!(genome_distance(&organism_1.network.genome, &organism_2.network.genome, 1., 0., 0.), 2. / 9.);
+        assert_approx_eq!(genome_distance(&organism_1.network.genome, &organism_2.network.genome, 0., 1., 0.), 3. / 9.);
     }
 
     #[test]

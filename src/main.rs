@@ -29,12 +29,6 @@ impl GameBoard {
     }
 }
 
-pub fn argsort<T: Ord>(data: &[T]) -> Vec<usize> {
-    let mut indices = (0..data.len()).collect::<Vec<_>>();
-    indices.sort_by_key(|&i| &data[i]);
-    indices
-}
-
 fn neat_move(network: &mut Network, gameboard: &GameBoard) -> CellLocation {
     network.activate(gameboard.as_sensor_values());
     let network_output = network.get_output();
@@ -147,7 +141,7 @@ fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
 
 struct Species {
     members: Vec<usize>,
-    representatve: Organism //TODO change to Vec<Connection>
+    representative: Vec<Connection>
 }
 
 struct EvaluatedSpecies<'a> {
@@ -156,55 +150,29 @@ struct EvaluatedSpecies<'a> {
     avg_fitness: f64
 }
 
-#[tailcall]
-fn species_loop<'a>(mut acc:Vec<Species>, all_orgs: &Vec<Organism>, species_ix: usize, org_ix:usize, delta_t: f64) -> Vec<Species> {
-    if species_ix < acc.len() {
-        let this_species = &mut acc[species_ix];
-        let this_org = &all_orgs[org_ix];
-
-        let distance = genome_distance(this_org, &this_species.representatve, 1., 1., 1.);
+fn species_loop(mut acc:Vec<Species>, orgs: &Vec<Organism>, org_ix: usize, delta_t: f64) -> Vec<Species> {
+    let org = &orgs[org_ix];
+    for this_species in acc.iter_mut() {
+        let distance = genome_distance(&org.network.genome, &this_species.representative, 1., 1., 1.);
         if distance < delta_t {
             this_species.members.push(org_ix);
-            acc
-        } else {
-            species_loop(acc, all_orgs, species_ix + 1, org_ix, delta_t)
+            return acc
         }
-    } else {
-        let new_species = Species{
-            members: vec![org_ix],
-            representatve: all_orgs[org_ix].clone()
-        };
-        acc.push(new_species);
-        acc
     }
+
+    let new_species = Species{
+        members: vec![org_ix],
+        representative: org.network.genome.clone()
+    };
+    acc.push(new_species);
+    acc
 }
 
-#[tailcall]
-fn genome_loop(mut acc:Vec<Species>, orgs:&Vec<Organism>, orgs_ix: usize, delta_t: f64) -> Vec<Species> {
-    if orgs_ix < orgs.len() {
-        acc = species_loop(acc, orgs, 0, orgs_ix, delta_t);
-        genome_loop(acc, orgs, orgs_ix + 1, delta_t)
-    } else {
-        acc
+fn genome_loop(mut acc:Vec<Species>, orgs:&Vec<Organism>, delta_t: f64) -> Vec<Species> {
+    for org_ix in 0 .. orgs.len() {
+        acc = species_loop(acc, orgs, org_ix, delta_t);
     }
-}
-
-fn get_distance_stats(orgs: &Vec<Organism>) -> (f64, f64, f64) {
-    let n = orgs.len();
-    let get_min = |a:f64, b:f64| if a < b {a} else {b};
-    let get_max = |a:f64, b:f64| if a > b {a} else {b};
-    let (min, max, mean_numer) = 
-        orgs.iter().tuple_combinations().par_bridge().map(|(org1, org2)|{
-            genome_distance(org1, org2, 1., 1., 1.)
-        }).fold(||(1., 0., 0.), |(mn, mx, num), d| {
-            (get_min(mn, d), get_max(mx, d), num + d)
-        }).reduce(|| (1., 0., 0.), |(a1, a2, a3),(b1, b2, b3)|{
-            (get_min(a1, b1), get_max(a2, b2), a3 + b3)
-        })
-        ;
-
-    let m = (n * (n - 1) / 2) as f64;
-    (min, max, mean_numer / m)
+    acc
 }
 
 fn main() {
@@ -215,8 +183,8 @@ fn main() {
     // // let (min, max, mean) = get_distance_stats(&all_orgs);
     // // println!("min: {min}; max: {max}; mean: {mean}");
 
-    let mut species = genome_loop(Vec::new(), &mut all_orgs, 0, 0.7);
-
+    let mut species = genome_loop(Vec::new(), &all_orgs,  0.7);
+    let n_species = species.len();
     for (i, s) in species.iter().enumerate() {
         let n = s.members.len();
         println!("round 1 species {i} has {n} members");
@@ -240,22 +208,23 @@ fn main() {
 
     let mut total_fitness = 0.;
 
-    let mut evaluated_species: Vec<EvaluatedSpecies> = Vec::with_capacity(species.len());
+    let mut evaluated_species: Vec<EvaluatedSpecies> = Vec::with_capacity(n_species);
 
     for s in species.iter() {
         let mut champ_fitness = 0.;
-        let mut champion = 0;
+        let mut champion = s.members[0];
         let mut avg_fitness = 0.;
 
-        for i in s.members.iter() {
-            let org = &mut all_orgs[*i];
+        let n = s.members.len() as f64;
+        for org_ix in s.members.iter() {
+            let org = &mut all_orgs[*org_ix];
             avg_fitness += org.fitness;
             if org.fitness > champ_fitness {
                 champ_fitness = org.fitness;
-                champion = *i;
+                champion = *org_ix;
             }
         }
-        let n = s.members.len() as f64;
+        
         avg_fitness = avg_fitness / n;
         total_fitness += avg_fitness;
 
@@ -268,18 +237,22 @@ fn main() {
     };
 
     let mut new_organisms:Vec<Organism> = Vec::with_capacity(pop_size + evaluated_species.len());
-    for s in evaluated_species {
+    for s in evaluated_species.iter() {
         let n_offspring = (s.avg_fitness / total_fitness * (pop_size as f64)) as usize;
         // choose parents
         let n_parents = std::cmp::min(n_offspring * 2, s.species.members.len());
         let parents = &s.species.members[0 .. n_parents];
+        println!("n_offspring: {n_offspring}; n_parents: {n_parents}");
 
         //generate offspring by cross_over and mutation
-        for _ in (0 .. n_offspring) {
-            let p1 = parents.choose(&mut rng).unwrap_or(&s.champion);
-            let p2 = parents.choose(&mut rng).unwrap_or(&s.champion);
+        for _ in 0 .. n_offspring {
+            let i1 = *parents.choose(&mut rng).unwrap_or(&s.champion);
+            let i2 = *parents.choose(&mut rng).unwrap_or(&s.champion);
 
-            let mut new_org = cross_over(&mut rng, &all_orgs[*p1], &all_orgs[*p2]);
+            let p1 = &all_orgs[i1];
+            let p2 = &all_orgs[i2];
+
+            let mut new_org = cross_over(&mut rng, p1, p2);
             let between = Uniform::from(0.0..1.0);
             let normal = Normal::new(1., 0.05).unwrap();
             for i_conn in (0 .. new_org.network.genome.len()) {
@@ -291,6 +264,7 @@ fn main() {
             }
             new_organisms.push(new_org);
         }
+        // let champion = s.champion.clone();
         let champion = all_orgs[s.champion].clone();
         new_organisms.push(champion)
     }
@@ -301,7 +275,7 @@ fn main() {
         s.members.clear()
     }
 
-    let new_species = genome_loop(species, &mut all_orgs, 0, 0.7);
+    let new_species = genome_loop(species, &mut new_organisms, 0.7);
 
     for (i, s) in new_species.iter().enumerate() {
         let n = s.members.len();
@@ -326,7 +300,7 @@ fn main() {
 
     let best_ai = new_organisms.iter().max_by(|a, b| a.fitness.total_cmp(&b.fitness)).unwrap();
     println!("best fitness: {}", best_ai.fitness);
-    // let simple_ai = Network::init(&mut rng, 9, 9);
+    
     let mut ai_controller = InitNetworkAiVsUser {network:best_ai.network.clone()};
 
     game_loop(&mut ai_controller);
