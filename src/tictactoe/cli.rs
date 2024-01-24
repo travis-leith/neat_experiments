@@ -1,4 +1,4 @@
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, stdout};
 use rand::seq::SliceRandom;
 // use tailcall::tailcall;
 use crate::tictactoe::game::*;
@@ -94,9 +94,12 @@ fn maybe_get_user_move() -> Option<CellLocation> {
 
     string_to_player_move(line1)
 }
+use crossterm::{execute, terminal::{self, Clear}, ExecutableCommand};
 
 fn clear_screen() {
-    print!("{}[2J", 27 as char);
+    // print!("{}[2J", 27 as char);
+    let x = Clear(terminal::ClearType::All);
+    let _y_ = stdout().execute(x);
 }
 
 pub fn get_user_move(gameboard: &GameBoard) -> CellLocation {
