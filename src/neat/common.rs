@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use rand::{distributions::{Distribution, Uniform}, RngCore};
-// use std::collections::{HashSet, HashMap};
-use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::{HashSet, HashMap};
+// use rustc_hash::{FxHashMap, FxHashSet};
 
 mod vector {
     #[derive(Copy, Clone)]
@@ -81,23 +81,29 @@ pub struct Node{
     value: f64,
     is_active: bool,
     has_active_inputs: bool,
-    input_connection_ids: FxHashSet<usize>,
-    input_node_ids: FxHashSet<usize>,
+    input_connection_ids: HashSet<usize>,
+    input_node_ids: HashSet<usize>,
     active_sum: f64,
+    distance_from_output: Option<usize>
     // is_output: bool,
     // node_type: NodeType,
 }
 
 impl Node {
     fn create(node_type: NodeType) -> Node {
+        let distance_from_output =
+            match node_type {
+                NodeType::Output => Some(0),
+                _ => None
+            };
         Node{
             value: 0.,
             is_active: node_type == NodeType::Sensor,
             has_active_inputs: false,
-            input_connection_ids: FxHashSet::default(),
-            input_node_ids: FxHashSet::default(),
+            input_connection_ids: HashSet::default(),
+            input_node_ids: HashSet::default(),
             active_sum: 0.,
-            // node_type: node_type
+            distance_from_output
         }
     }
 }
@@ -108,7 +114,8 @@ pub struct Connection {
     pub out_node_id: usize,
     pub weight: f64,
     pub innovation: InnovationNumber,
-    enabled: bool
+    pub enabled: bool,
+    distance_from_output: Option<usize>
 }
 
 #[derive(Clone)]
@@ -116,7 +123,7 @@ pub struct Network {
     pub has_bias_node: bool,
     pub genome: Vec<Connection>,
     pub out_of_order: bool, //indicates that some mutation has happened that has re-used a known innovation number, and has led to an out of order genome
-    pub n_sensor_nodes: usize,
+    pub n_sensor_nodes: usize, //includes a bias node if it exists
     pub n_output_nodes: usize,
     pub nodes: Vec<Node>,
 }
@@ -130,6 +137,31 @@ fn relu(x: f64) -> f64 {
 }
 
 impl Network {
+
+    fn set_distance_vector(&mut self) {
+        let mut working_set = HashSet::with_capacity(self.n_output_nodes);
+        let mut next_working_set = HashSet::with_capacity(self.n_output_nodes);
+        let mut current_depth = 0;
+        (self.n_sensor_nodes .. self.n_sensor_nodes + self.n_output_nodes).for_each(|i|{
+            working_set.insert(i);
+        });
+
+        while working_set.len() > 0 {
+            current_depth += 1;
+            next_working_set.clear();
+            working_set.iter().for_each(|nodex_ix|{
+                self.nodes[*nodex_ix].input_node_ids.clone().iter().for_each(|in_node_ix|{
+                    self.nodes[*nodex_ix].distance_from_output = Some(current_depth);
+                    if *in_node_ix >= self.n_sensor_nodes && self.nodes[*in_node_ix].distance_from_output.is_none() {
+                        next_working_set.insert(in_node_ix.clone());
+                    }
+                })
+            });
+            working_set = next_working_set.clone();
+        }
+
+        
+    }
 
     pub fn create_from_genome(n_sensor_nodes: usize, n_output_nodes: usize, genome: Vec<Connection>, has_bias_node: bool) -> Network {
         //TODO remove connections involving dead end nodes
@@ -210,7 +242,8 @@ impl Network {
                     out_node_id,
                     weight: between.sample(rng),
                     innovation: InnovationNumber(innovation_number),
-                    enabled: true
+                    enabled: true,
+                    distance_from_output: Some(1)
                 };
                 genome.push(conn);
                 let conn_id = innovation_number;//during init, conneciton index happens to allign with innovation number
@@ -314,7 +347,7 @@ impl Network {
 }
 
 
-pub fn add_connection(mut network: Network, in_node_id: usize, out_node_id: usize, weight: f64, global_innovation: &mut InnovationNumber, innovation_record: &mut FxHashMap<(usize, usize), InnovationNumber>) -> Network {
+pub fn add_connection(mut network: Network, in_node_id: usize, out_node_id: usize, weight: f64, global_innovation: &mut InnovationNumber, innovation_record: &mut HashMap<(usize, usize), InnovationNumber>) -> Network {
     debug_assert!(in_node_id != out_node_id, "Tried to add a connection where input is the same node as output");
     debug_assert!(in_node_id < network.n_sensor_nodes || in_node_id >= (network.n_sensor_nodes + network.n_output_nodes), "Tried to add a connection that inputs from an output node");
     debug_assert!(out_node_id >= network.n_sensor_nodes, "Tried to add a connection that outputs to a sensor node");
@@ -344,7 +377,8 @@ pub fn add_connection(mut network: Network, in_node_id: usize, out_node_id: usiz
             out_node_id,
             weight,
             innovation: innov_number,
-            enabled: true
+            enabled: true,
+            distance_from_output: None
         };
         let new_conn_ix = network.genome.len();
         
@@ -358,7 +392,7 @@ pub fn add_connection(mut network: Network, in_node_id: usize, out_node_id: usiz
     }
 }
 
-pub fn add_node(mut network: Network, existing_conn_index: usize, global_innovation: &mut InnovationNumber, innovation_record: &mut FxHashMap<(usize, usize), InnovationNumber>) -> Network {
+pub fn add_node(mut network: Network, existing_conn_index: usize, global_innovation: &mut InnovationNumber, innovation_record: &mut HashMap<(usize, usize), InnovationNumber>) -> Network {
     let in_node_id = network.genome[existing_conn_index].in_node_id;
     let out_node_id = network.genome[existing_conn_index].out_node_id;
     let weight = network.genome[existing_conn_index].weight;
@@ -375,11 +409,12 @@ pub fn add_node(mut network: Network, existing_conn_index: usize, global_innovat
     
     let new_hidden_node = Node{
         has_active_inputs: false,
-        input_connection_ids: FxHashSet::default(),
-        input_node_ids: FxHashSet::default(),
+        input_connection_ids: HashSet::default(),
+        input_node_ids: HashSet::default(),
         is_active: false,
         active_sum: 0.,
         value: 0.,
+        distance_from_output: None
     };
 
     existing_conn.enabled = false;
@@ -582,7 +617,7 @@ mod tests {
         }
     }
 
-    fn add_node_by_in_out(network: Network, in_id: usize, out_id: usize, new_weight: f64, global_innovation: &mut InnovationNumber, innovation_record: &mut FxHashMap<(usize, usize), InnovationNumber>) -> Network {
+    fn add_node_by_in_out(network: Network, in_id: usize, out_id: usize, new_weight: f64, global_innovation: &mut InnovationNumber, innovation_record: &mut HashMap<(usize, usize), InnovationNumber>) -> Network {
         let conn_index = match network.genome.iter().enumerate().find(|(_,x)| x.in_node_id == in_id && x.out_node_id == out_id && x.enabled) {
             Some((index, _)) => index,
             None => panic!("Cannot add a node to a connection that does not exist")
@@ -623,21 +658,21 @@ mod tests {
     #[should_panic(expected = "Tried to add a connection that outputs to a sensor node")]
     fn cannot_add_connection_out_to_sensor() {
         let network = Network::empty(2, 2);
-        let _ = add_connection(network, 1, 0, 0., &mut InnovationNumber(0), &mut FxHashMap::default());
+        let _ = add_connection(network, 1, 0, 0., &mut InnovationNumber(0), &mut HashMap::default());
     }
 
     #[test]
     #[should_panic(expected = "Tried to add a connection that inputs from an output node")]
     fn cannot_add_connection_in_from_output() {
         let network = Network::empty(2, 2);
-        let _ = add_connection(network, 2, 3, 0., &mut InnovationNumber(0), &mut FxHashMap::default());
+        let _ = add_connection(network, 2, 3, 0., &mut InnovationNumber(0), &mut HashMap::default());
     }
 
     #[test]
     #[should_panic(expected = "Tried to add a connection that outputs beyond node count")]
     fn cannot_add_connection_beyond_length() {
         let network = Network::empty(2, 2);
-        let _ = add_connection(network, 1, 5, 0., &mut InnovationNumber(0), &mut FxHashMap::default());
+        let _ = add_connection(network, 1, 5, 0., &mut InnovationNumber(0), &mut HashMap::default());
     }
 
     #[test]
@@ -645,7 +680,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let network = Network::init(&mut rng, 2, 2, false);
         let existing_conn_weight= network.genome[0].weight;
-        let network = add_node(network, 0, &mut InnovationNumber(0), &mut FxHashMap::default());
+        let network = add_node(network, 0, &mut InnovationNumber(0), &mut HashMap::default());
 
         assert_eq!(network.genome[0].enabled, false);
         assert_eq!(network.genome[4].in_node_id, 0);
@@ -661,7 +696,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let network = Network::init(&mut rng, 2, 2, false);
         let mut global_innovation = InnovationNumber(4);
-        let mut innovation_rec = FxHashMap::default();
+        let mut innovation_rec = HashMap::default();
         let network = add_node(network, 0, &mut global_innovation, &mut innovation_rec);
         let network = add_connection(network, 1, 4, 0.5, &mut global_innovation, &mut innovation_rec);
         assert_eq!(network.nodes[3].input_connection_ids.len(), 2);
@@ -675,7 +710,7 @@ mod tests {
         let network = Network::init(&mut rng, 3, 2, true);
         // let existing_conn_weight= network.genome[3].weight;
         assert_eq!(network.genome.len(), 6);
-        let network = add_node(network, 5, &mut InnovationNumber(0), &mut FxHashMap::default());
+        let network = add_node(network, 5, &mut InnovationNumber(0), &mut HashMap::default());
         assert_eq!(network.genome.len(), 8);
     }
 
@@ -683,7 +718,7 @@ mod tests {
     fn feed_forward() {
         let network = Network::empty(2, 2);
         let mut global_innov = InnovationNumber(4);
-        let mut inno_rec = FxHashMap::default();
+        let mut inno_rec = HashMap::default();
         //these connections will be disabled by adding nodes
         assert_eq!(network.genome.len(), 0);
         let network = add_connection(network, 0, 3, 0.6, &mut global_innov, &mut inno_rec);
@@ -708,7 +743,7 @@ mod tests {
     fn recurrent() {
         let network = Network::empty(2, 1);
         let mut global_innov = InnovationNumber(2);
-        let mut inno_rec = FxHashMap::default();
+        let mut inno_rec = HashMap::default();
 
         let network = add_connection(network, 1, 2, 0.9, &mut global_innov, &mut inno_rec);
         let network = add_node_by_in_out(network, 1, 2, 0.1, &mut global_innov, &mut inno_rec); //this creates node 3 between 1 and 2
@@ -731,7 +766,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let ancestor = Network::init(&mut rng, 3, 1, false);
         let mut global_innov = InnovationNumber(3);
-        let mut inno_rec = FxHashMap::default();
+        let mut inno_rec = HashMap::default();
         let ancestor = add_node_by_in_out(ancestor, 1, 3, 0.5, &mut global_innov, &mut inno_rec);
 
         let parent2 = add_node_by_in_out(ancestor.clone(), 4, 3, 0.5, &mut global_innov, &mut inno_rec);
