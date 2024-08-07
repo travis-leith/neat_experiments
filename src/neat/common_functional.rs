@@ -5,7 +5,9 @@ pub struct NodeIndex(pub usize);
 pub struct GeneIndex(pub usize);
 
 mod genome {
+    use std::ops::Index;
     use super::NodeIndex;
+    use super::GeneIndex;
 
     pub struct InnovationNumber(pub usize);
     impl InnovationNumber {
@@ -58,8 +60,24 @@ mod genome {
         pub fn create(data: Vec<Gene>) -> Genome {
             Genome(data)
         }
+
+        pub fn push(&mut self, gene: Gene) {
+            self.0.push(gene);
+        }
+
+        pub fn len(&self) -> usize {
+            self.0.len()
+        }        
+    }
+
+    impl Index<GeneIndex> for Genome {
+        type Output = Gene;
+        fn index(&self, index: GeneIndex) -> &Self::Output {
+            &self.0[index.0]
+        }
     }
 }
+
 
 mod phenome {
     use std::ops::Index;
@@ -139,6 +157,7 @@ pub struct Network {
     pub n_output_nodes: usize,
 }
 
+use rand::{distributions::{Distribution, Uniform}, RngCore};
 impl Network {
     pub fn create_from_genome(n_sensor_nodes: usize, n_output_nodes: usize, genome: Genome) -> Network {
         //TODO remove connections involving dead end nodes
@@ -159,7 +178,24 @@ impl Network {
         }
     }
 
-    
+    pub fn init(rng: &mut dyn RngCore, n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
+        let between = Uniform::from(-1.0..1.0);
+
+        let n_connections = n_sensor_nodes * n_output_nodes;
+        let mut genome : Genome = Genome::create(Vec::with_capacity(n_connections));
+
+        for out_node_ind in 0..n_output_nodes {
+            let out_node_id = out_node_ind + n_sensor_nodes;
+            for in_node_ind in 0..n_sensor_nodes {
+                let in_node_id = in_node_ind;
+                let innovation_number = out_node_ind * n_sensor_nodes + in_node_ind;
+                let conn = Gene::create(in_node_id, out_node_id, between.sample(rng), innovation_number, true);
+                genome.push(conn);
+            }
+        }
+
+        Network::create_from_genome(n_sensor_nodes, n_output_nodes, genome)
+    }
 }
 
 #[cfg(test)]
@@ -195,5 +231,26 @@ mod tests {
         assert_eq!(network.phenome[NodeIndex(2)].inputs.len(), 0);
         assert_eq!(network.phenome[NodeIndex(3)].inputs.len(), 2);
         assert_eq!(network.phenome[NodeIndex(4)].inputs.len(), 3);
+    }
+
+    #[test]
+    fn network_init(){
+        let mut rng = rand::thread_rng();
+        let n_sensor_nodes = 9;
+        let n_output_nodes = 10;
+        let n_total = n_sensor_nodes + n_output_nodes;
+        let network = Network::init(&mut rng, n_sensor_nodes, n_output_nodes);
+        assert_eq!(network.genome[GeneIndex(89)].innovation.0, 89);
+        assert_eq!(network.genome.len(), 90);
+        assert_eq!(network.phenome.len(), n_total);
+        assert_eq!(network.n_output_nodes, n_output_nodes);
+        assert_eq!(network.n_sensor_nodes, n_sensor_nodes);
+
+        for node_index in network.n_sensor_nodes..network.phenome.len() {
+            let node = &network.phenome[NodeIndex(node_index)];
+            let l = node.inputs.len();
+            assert_eq!(l, n_sensor_nodes)
+        }
+            
     }
 }
