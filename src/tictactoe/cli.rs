@@ -1,6 +1,5 @@
 use std::io::{self, BufRead, stdout};
 use rand::seq::SliceRandom;
-// use tailcall::tailcall;
 use crate::tictactoe::game::*;
 use crate::tictactoe::display::board_to_string;
 
