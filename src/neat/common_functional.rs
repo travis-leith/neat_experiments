@@ -1,7 +1,7 @@
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
-
 pub struct NodeIndex(pub usize);
+#[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct GeneIndex(pub usize);
 
 mod genome {
@@ -85,18 +85,19 @@ mod phenome {
     use super::NodeIndex;
     use super::GeneIndex;
     #[derive(PartialEq)]
-    enum NodeType{
+    pub enum NodeType{
         Sensor,
         Hidden,
         Output,
     }
     
     pub struct Node {
-        value: f64,
-        is_active: bool,
-        has_active_inputs: bool,
+        pub value: f64,
+        pub is_active: bool,
+        pub has_active_inputs: bool,
         pub inputs: Vec<GeneIndex>,
-        active_sum: f64,
+        pub active_sum: f64,
+        pub node_type: NodeType,
     }
     
     impl Node {
@@ -107,6 +108,7 @@ mod phenome {
                 has_active_inputs: false,
                 inputs: Vec::new(),
                 active_sum: 0.,
+                node_type,
             }
         }
     }
@@ -129,6 +131,14 @@ mod phenome {
 
         pub fn len(&self) -> usize {
             self.0.len()
+        }
+
+        pub fn iter(&self) -> std::slice::Iter<Node> {
+            self.0.iter()
+        }
+
+        pub fn iter_mut(&mut self) -> std::slice::IterMut<Node> {
+            self.0.iter_mut()
         }
     }
 
@@ -195,6 +205,99 @@ impl Network {
         }
 
         Network::create_from_genome(n_sensor_nodes, n_output_nodes, genome)
+    }
+
+    pub fn activate1(&self, inputs: Vec<f64>) -> Vec<f64> {
+        let mut node_values = vec![0.0; self.n_sensor_nodes + self.n_output_nodes];
+        
+        // Initialize sensor node values
+        for (i, &input) in inputs.iter().enumerate() {
+            node_values[i] = input;
+        }
+
+        // Define the activation function (sigmoid)
+        fn sigmoid(x: f64) -> f64 {
+            1.0 / (1.0 + (-x).exp())
+        }
+
+        // Propagate values through the network
+        let mut new_values = node_values.clone();
+        let mut iterations = 0;
+        let max_iterations = 10; // To handle recurrent connections
+        let epsilon = 1e-6; // Convergence threshold
+
+        while iterations < max_iterations {
+            for gene in self.genome.iter() {
+                if gene.enabled {
+                    let input_value = node_values[gene.in_node_id.0];
+                    new_values[gene.out_node_id.0] += input_value * gene.weight;
+                }
+            }
+
+            // Apply activation function to all nodes except sensor nodes
+            for i in self.n_sensor_nodes..(self.n_sensor_nodes + self.n_output_nodes) {
+                new_values[i] = sigmoid(new_values[i]);
+            }
+
+            // Check for convergence
+            let mut converged = true;
+            for i in 0..new_values.len() {
+                if (new_values[i] - node_values[i]).abs() > epsilon {
+                    converged = false;
+                    break;
+                }
+            }
+
+            if converged {
+                break;
+            }
+
+            node_values = new_values.clone();
+            iterations += 1;
+        }
+
+        // Collect output values
+        let outputs = node_values[self.n_sensor_nodes..(self.n_sensor_nodes + self.n_output_nodes)].to_vec();
+        outputs
+    }
+
+    pub fn activate3(&mut self) -> bool {
+        let mut abortcount = 0;
+    
+        while self.outputsoff() && abortcount < 20 {
+            // Compute incoming activation for each node
+            for i in 0..self.phenome.len() {
+                let node_index = NodeIndex(i);
+                if self.phenome[node_index].node_type != NodeType::Sensor {
+                    self.phenome[node_index].active_sum = 0.0;
+                    self.phenome[node_index].has_active_inputs = false;
+    
+                    for input_index in &self.phenome[node_index].inputs.clone() {
+                        let input_gene = &self.genome[*input_index];
+                        let input_node = &self.phenome[input_gene.in_node_id];
+                        if input_node.is_active || input_node.node_type == NodeType::Sensor {
+                            self.phenome[node_index].active_sum += input_node.value; // Assuming value is the activation
+                            self.phenome[node_index].has_active_inputs = true;
+                        }
+                    }
+                }
+            }
+    
+            abortcount += 1;
+        }
+    
+        abortcount < 20
+    }
+
+    fn outputsoff(&self) -> bool {
+        // Implement this method to check if all output nodes are active
+        todo!();
+    }
+}
+
+impl Node {
+    fn activate(&mut self) {
+        // Implement the activation logic here
     }
 }
 
