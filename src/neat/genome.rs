@@ -1,16 +1,16 @@
 use std::ops::Index;
-use super::phenome::NodeIndex;
-pub struct InnovationNumber(pub usize);
-impl InnovationNumber {
-    fn inc(mut self) -> InnovationNumber {
-        self.0 += 1;
-        self
-    }
-}
+use itertools::Itertools;
+use rand::RngCore;
+use rand_distr::{Distribution, Uniform};
+
+use crate::neat::vector::{AllignedPair, allign};
+
+use super::{innovation::InnovationNumber, phenome::NodeIndex};
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct GeneIndex(pub usize);
 
+#[derive(Clone)]
 pub struct Gene {
     pub in_node_id: NodeIndex,
     pub out_node_id: NodeIndex,
@@ -76,6 +76,8 @@ impl Genome {
             }).collect()
         }).collect()
     }
+
+    
 }
 
 impl Index<GeneIndex> for Genome {
@@ -83,6 +85,67 @@ impl Index<GeneIndex> for Genome {
     fn index(&self, index: GeneIndex) -> &Self::Output {
         &self.0[index.0]
     }
+}
+
+pub fn cross_over(rng: &mut dyn RngCore, genome_1: &Genome, fitness_1: usize, genome_2: &Genome, fitness_2: usize) -> Genome {
+    let between = Uniform::from(0.0..1.0);
+    let mut choose_gene = |pair: AllignedPair<Gene>| {
+        let r = between.sample(rng);
+        match pair{
+            AllignedPair::HasBoth(left, right) => {
+                if r > 0.5 {
+                    Some((*left).clone())
+                } else {
+                    Some((*right).clone())
+                }
+            },
+            AllignedPair::HasLeft(left) => {
+                if fitness_1 > fitness_2 {
+                    Some((*left).clone())
+                } else if fitness_1 < fitness_2 {
+                    None
+                } else {
+                    Some((*left).clone()) //prefer left. do not randomly choose as this could result in dead end nodes if not done consistently
+                }
+            },
+            AllignedPair::HasRight(right) => {
+                if fitness_1 > fitness_2 {
+                    None
+                } else if fitness_1 < fitness_2 {
+                    Some((*right).clone())
+                } else {
+                    None //prefer left. do not randomly choose as this could result in dead end nodes if not done consistently
+                }
+            }
+        }
+    };
+
+    for i in 1 .. genome_1.len() {
+        // if organism_1.network.genome[i].innovation.0 <= organism_1.network.genome[i-1].innovation.0 {
+        //     println!("left {}", organism_1.network.genome[i].innovation.0);
+        //     println!("right {}", organism_1.network.genome[i - 1].innovation.0);
+        //     println!("found one")
+        // }
+        debug_assert!(genome_1[GeneIndex(i)].innovation.0 > genome_1[GeneIndex(i-1)].innovation.0)
+    }
+    for i in 1 .. genome_2.len() {
+        // if organism_2.network.genome[i].innovation.0 <= organism_2.network.genome[i-1].innovation.0 {
+        //     println!("left {}", organism_2.network.genome[i].innovation.0);
+        //     println!("right {}", organism_2.network.genome[i - 1].innovation.0);
+        //     println!("found one")
+        // }
+        debug_assert!(genome_2[GeneIndex(i)].innovation.0 > genome_2[GeneIndex(i-1)].innovation.0)
+    }
+
+    let get_id = |gene:&Gene| gene.innovation.0;
+    let new_genome_vec = 
+        allign(&genome_1.0, &genome_2.0, &get_id, &mut choose_gene)
+        .into_iter().flatten().collect_vec();
+    let new_genome = Genome(new_genome_vec);
+
+    // new_genome.sort_by_key(|conn|conn.innovation.0);
+        
+    new_genome
 }
 
 #[cfg(test)]
