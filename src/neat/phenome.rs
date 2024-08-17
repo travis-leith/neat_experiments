@@ -9,7 +9,7 @@ pub enum NodeType{
     Output,
 }
 
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
+#[derive(PartialEq, PartialOrd, Clone, Copy, Hash, Eq)]
 pub struct NodeIndex(pub usize);
 
 #[derive(Default)]

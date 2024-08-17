@@ -26,11 +26,11 @@ impl Organism {
 
 use super::vector::{AllignedPair, allign};
 
-pub fn cross_over(rng: &mut dyn RngCore, organism_1: &Organism, organism_2: &Organism) -> Organism {
+// pub fn cross_over(rng: &mut dyn RngCore, organism_1: &Organism, organism_2: &Organism) -> Organism {
    
-    let new_network = super::network::cross_over(rng, &organism_1.network, organism_1.fitness, &organism_2.network, organism_2.fitness);
-    Organism {
-        network: new_network,
-        fitness: 0
-    }
-}
+//     let new_network = super::network::cross_over(rng, &organism_1.network, organism_1.fitness, &organism_2.network, organism_2.fitness);
+//     Organism {
+//         network: new_network,
+//         fitness: 0
+//     }
+// }

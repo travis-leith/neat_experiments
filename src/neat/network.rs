@@ -1,4 +1,4 @@
-use super::genome::{Genome, GeneIndex, Gene};
+use super::genome::{Gene, GeneExt, GeneIndex, Genome};
 use super::phenome::{Phenome, NodeIndex, NodeType};
 use super::innovation::{InnovationNumber, InnovationContext};
 
@@ -17,9 +17,9 @@ impl Network {
         let max_node_id = genome.calculate_max_node_id();
         let mut phenome = Phenome::create_disconnected(n_sensor_nodes, n_output_nodes, max_node_id);
 
-        for (i, gene) in genome.iter().enumerate() {
-            if gene.enabled {
-                phenome[gene.out_node_id].inputs.push(GeneIndex(i));
+        for (i, (gene_key, gene_val)) in genome.iter().enumerate() {
+            if gene_val.enabled {
+                phenome[gene_key.out_node_id].inputs.push(GeneIndex(i));
             }
         }
 
@@ -44,8 +44,8 @@ impl Network {
             for in_node_ind in 0..n_sensor_nodes {
                 let in_node_id = in_node_ind;
                 let innovation_number = out_node_ind * n_sensor_nodes + in_node_ind;
-                let conn = Gene::create(in_node_id, out_node_id, between.sample(rng), innovation_number, true);
-                genome.push(conn);
+                let gene = Gene::create(in_node_id, out_node_id, between.sample(rng), innovation_number, true);
+                genome.push(gene);
             }
         }
 
@@ -72,9 +72,9 @@ impl Network {
                     continue;
                 }
                 let active_sum = node.inputs.iter().fold(0., |acc, gene_index| {
-                    let gene = &self.genome[*gene_index];
-                    if gene.enabled {
-                        acc + gene.weight * self.phenome[gene.in_node_id].value
+                    let (gene_key, gene_value) = &self.genome.get_index(*gene_index);
+                    if gene_value.enabled {
+                        acc + gene_value.weight * self.phenome[gene_key.in_node_id].value
                     } else {
                         acc
                     }
@@ -136,9 +136,9 @@ pub fn add_connection(mut network: Network, mut innovation_context: InnovationCo
 
 
 pub fn add_node(mut network: Network, mut innovation_context: InnovationContext, existing_conn_index: GeneIndex) -> (Network, InnovationContext) {
-    let in_node_id = network.genome[existing_conn_index].in_node_id;
-    let out_node_id = network.genome[existing_conn_index].out_node_id;
-    let weight = network.genome[existing_conn_index].weight;
+    // let in_node_id = network.genome[existing_conn_index].in_node_id;
+    // let out_node_id = network.genome[existing_conn_index].out_node_id;
+    // let weight = network.genome[existing_conn_index].weight;
 
     // let genome = &mut network.genome[..];
     // let nodes = &mut network.nodes[..];
@@ -172,13 +172,13 @@ pub fn add_node(mut network: Network, mut innovation_context: InnovationContext,
 
 }
 
-pub fn cross_over(rng: &mut dyn RngCore, network_1: &Network, fitness_1: usize, network_2: &Network, fitness_2: usize) -> Network {
-    debug_assert!(network_1.n_output_nodes == network_2.n_output_nodes, "Organisms with mismatching output size cannot be crossed");
-    debug_assert!(network_1.n_sensor_nodes == network_2.n_sensor_nodes, "Organisms with mismatching input size cannot be crossed");
+// pub fn cross_over(rng: &mut dyn RngCore, network_1: &Network, fitness_1: usize, network_2: &Network, fitness_2: usize) -> Network {
+//     debug_assert!(network_1.n_output_nodes == network_2.n_output_nodes, "Organisms with mismatching output size cannot be crossed");
+//     debug_assert!(network_1.n_sensor_nodes == network_2.n_sensor_nodes, "Organisms with mismatching input size cannot be crossed");
 
-    let new_genome = super::genome::cross_over(rng, &network_1.genome, fitness_1, &network_2.genome, fitness_2);
-    Network::create_from_genome(network_1.n_sensor_nodes, network_1.n_output_nodes, new_genome)
-}
+//     let new_genome = super::genome::cross_over(rng, &network_1.genome, fitness_1, &network_2.genome, fitness_2);
+//     Network::create_from_genome(network_1.n_sensor_nodes, network_1.n_output_nodes, new_genome)
+// }
 
 #[cfg(test)]
 mod tests {
@@ -193,6 +193,18 @@ mod tests {
             Gene::create(5, 3, -0.9, 3, true),
             Gene::create(0, 5, 0.6, 4, true),
             Gene::create(5, 2, 0.4, 5, true),
+        ])
+    }
+
+    fn genome_sample_recurrent_1() -> Genome{
+        Genome::create(vec![
+            Gene::create(3, 2, 0.9, 0, true),
+            Gene::create(1, 4, -0.8, 1, true),
+            Gene::create(4, 3, 0.1, 2, true),
+            Gene::create(5, 2, -0.4, 3, true),
+            Gene::create(0, 4, -0.8, 4, true),
+            Gene::create(3, 5, 0.5, 5, true),
+            Gene::create(5, 4, -0.1, 6, true),
         ])
     }
 
@@ -217,7 +229,7 @@ mod tests {
         let n_output_nodes = 10;
         let n_total = n_sensor_nodes + n_output_nodes;
         let network = Network::init(&mut rng, n_sensor_nodes, n_output_nodes);
-        assert_eq!(network.genome[GeneIndex(89)].innovation.0, 89);
+        assert_eq!(network.genome.get_index(GeneIndex(89)).1.innovation.0, 89);
         assert_eq!(network.genome.len(), 90);
         assert_eq!(network.phenome.len(), n_total);
         assert_eq!(network.n_output_nodes, n_output_nodes);
@@ -240,5 +252,22 @@ mod tests {
         network.activate(vec![0.5, -0.2]);
         assert_approx_eq!(network.phenome[NodeIndex(2)].value, 0.184);
         assert_approx_eq!(network.phenome[NodeIndex(3)].value, 0.);
+    }
+
+    #[test]
+    fn recurrent() {
+        let genome = genome_sample_recurrent_1();
+        let mut network =  Network::create_from_genome(2, 1, genome);
+
+        let inputs = vec![-0.9, 0.6];
+        network.activate(inputs.clone());
+        assert_approx_eq!(network.phenome[NodeIndex(2)].value, 0.);
+
+        network.activate(inputs.clone());
+        assert_approx_eq!(network.phenome[NodeIndex(2)].value, 0.0216);
+
+        network.activate(inputs.clone());
+        assert_approx_eq!(network.phenome[NodeIndex(2)].value, 0.0168);
+        
     }
 }

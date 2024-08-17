@@ -1,7 +1,7 @@
-use rustc_hash::{FxHashMap};
+// use rustc_hash::{FxHashMap};
 use super::phenome::NodeIndex;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub struct InnovationNumber(pub usize);
 
 impl InnovationNumber {
@@ -13,5 +13,5 @@ impl InnovationNumber {
 
 pub struct InnovationContext {
     pub next_innovation_number: InnovationNumber,
-    pub innovation_map: FxHashMap<(NodeIndex, NodeIndex), InnovationNumber>,
+    // pub innovation_map: FxHashMap<(NodeIndex, NodeIndex), InnovationNumber>,
 }
