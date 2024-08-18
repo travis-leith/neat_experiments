@@ -9,7 +9,7 @@ type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 
 use crate::neat::vector::{AllignedTuplePair, allign_indexmap_map, allign_indexmap_iter};
 
-use super::{innovation::InnovationNumber, phenome::NodeIndex};
+use super::{innovation::{InnovationContext, InnovationNumber}, phenome::NodeIndex};
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct GeneIndex(pub usize);
@@ -22,8 +22,6 @@ pub struct GeneKey {
 
 #[derive(Clone)]
 pub struct GeneValue {
-    // pub in_node_id: NodeIndex,
-    // pub out_node_id: NodeIndex,
     pub weight: f64,
     pub innovation: InnovationNumber,
     pub enabled: bool
@@ -32,8 +30,6 @@ pub struct GeneValue {
 impl GeneValue {
     pub fn create(weight: f64, innovation: usize, enabled: bool) -> GeneValue {
         GeneValue {
-            // in_node_id: NodeIndex(in_node_id),
-            // out_node_id: NodeIndex(out_node_id),
             weight,
             innovation: InnovationNumber(innovation),
             enabled,
@@ -59,46 +55,72 @@ impl GeneExt for Gene {
     }
 }
 
-pub struct Genome(FxIndexMap<GeneKey, GeneValue>);
+pub struct Genome{
+    data: FxIndexMap<GeneKey, GeneValue>,
+    pub next_node_id: NodeIndex
+}
+
 impl Genome {
-    pub fn calculate_max_node_id(&self) -> usize {
-        let res = 
-            self.0.keys().fold(NodeIndex(0), |acc, gene_key| {
-                if gene_key.in_node_id > acc {
-                    gene_key.in_node_id
-                } else if gene_key.out_node_id > acc {
-                    gene_key.out_node_id
-                } else {
-                    acc
-                }
-            });
-        res.0
-    }
-
     pub fn iter(&self) -> indexmap::map::Iter<GeneKey, GeneValue> {
-        self.0.iter()
+        self.data.iter()
     }
 
-    pub fn create(data: Vec<Gene>) -> Genome {
-        
-        Genome(data.into_iter().collect())
+    pub fn create(genes: Vec<Gene>) -> Genome {
+        let max_node_id = genes.iter().fold(NodeIndex(0), |acc, (gene_key, _)| {
+            if gene_key.in_node_id > acc {
+                gene_key.in_node_id
+            } else if gene_key.out_node_id > acc {
+                gene_key.out_node_id
+            } else {
+                acc
+            }
+        });
+        let data = genes.into_iter().collect();
+        let next_node_id = max_node_id.inc();
+        Genome{data, next_node_id}
     }
 
-    pub fn push(&mut self, gene: Gene) {
-        self.0.insert(gene.0, gene.1);
+    pub fn init(rng: &mut dyn RngCore, n_sensor_nodes: usize, n_output_nodes: usize) -> Genome {
+        let between = Uniform::from(-1.0..1.0);
+
+        let n_connections = n_sensor_nodes * n_output_nodes;
+        let mut data = IndexMap::with_capacity_and_hasher(n_connections, FxBuildHasher::default());
+
+        for out_node_ind in 0..n_output_nodes {
+            let out_node_id = out_node_ind + n_sensor_nodes;
+            for in_node_ind in 0..n_sensor_nodes {
+                let in_node_id = in_node_ind;
+                let innovation_number = out_node_ind * n_sensor_nodes + in_node_ind;
+                let (gene_key, gene_val) = Gene::create(in_node_id, out_node_id, between.sample(rng), innovation_number, true);
+                data.insert(gene_key, gene_val);
+            }
+        }
+
+        let next_node_id = NodeIndex(n_sensor_nodes + n_output_nodes);
+
+        Genome{data, next_node_id}
     }
+
+    // pub fn push(&mut self, gene: Gene) {
+    //     if gene.0.in_node_id >= self.next_node_id {
+    //         self.next_node_id = gene.0.in_node_id.inc()
+    //     } else if gene.0.out_node_id >= self.next_node_id {
+    //         self.next_node_id = gene.0.out_node_id.inc()
+    //     };
+    //     self.data.insert(gene.0, gene.1);
+    // }
 
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.data.len()
     }
 
     pub fn get_index(&self, index: GeneIndex) -> (&GeneKey, &GeneValue) {
-        self.0.get_index(index.0).unwrap()
+        self.data.get_index(index.0).unwrap()
     }
 
     pub fn tarjan_scc(&self) -> Vec<Vec<NodeIndex>> {
         use petgraph::graph::DiGraph;
-        let edges = self.0.keys().map(|gene_key| (gene_key.in_node_id.0, gene_key.out_node_id.0));
+        let edges = self.data.keys().map(|gene_key| (gene_key.in_node_id.0, gene_key.out_node_id.0));
         let graph: petgraph::graph::DiGraph<(), (), usize> = DiGraph::from_edges(edges);
 
 
@@ -110,7 +132,34 @@ impl Genome {
         }).collect()
     }
 
+    pub fn add_connection(&mut self, innovation_context: &mut InnovationContext, in_node_id: NodeIndex, out_node_id: NodeIndex, weight: f64) {
+        debug_assert!(in_node_id != out_node_id, "Tried to add a connection where input is the same node as output");
+        debug_assert!(in_node_id < self.next_node_id, "Tried to add a connection with an input node that does not exist");
+        debug_assert!(out_node_id < self.next_node_id, "Tried to add a connection with an output node that does not exist");
+
+        let gene_key = GeneKey {
+            in_node_id,
+            out_node_id
+        };
+
+        let innov_number = innovation_context.get_innovation_number(gene_key.clone());
+        let gene_value = GeneValue::create(weight, innov_number.0, true);
+        let insertion_result = self.data.insert(gene_key, gene_value);
+        debug_assert!(insertion_result.is_none(), "Tried to add a connection that already exists");
+    }
+
+    pub fn add_node(&mut self, innovation_context: &mut InnovationContext, existing_conn_index: GeneIndex) {
+        let (gene_key, gene_val) = {
+            let (gene_key, gene_val) = self.get_index(existing_conn_index);
+            (gene_key.clone(), gene_val.clone())
+        };
     
+        if gene_val.enabled {
+            let new_node_id = self.next_node_id;
+            self.add_connection(innovation_context, gene_key.in_node_id, new_node_id, 1.);
+            self.add_connection(innovation_context, new_node_id, gene_key.out_node_id, gene_val.weight);
+        }    
+    }
 }
 
 pub fn cross_over(rng: &mut dyn RngCore, genome_1: &Genome, fitness_1: usize, genome_2: &Genome, fitness_2: usize) -> Genome {
@@ -167,9 +216,9 @@ pub fn cross_over(rng: &mut dyn RngCore, genome_1: &Genome, fitness_1: usize, ge
     }
 
     let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
-    let new_genome_vec = 
-    allign_indexmap_map(&genome_1.0, &genome_2.0, &get_id, &mut choose_gene);
-    let new_genome = Genome(new_genome_vec);
+    let new_genome_data = allign_indexmap_map(&genome_1.data, &genome_2.data, &get_id, &mut choose_gene);
+    let new_next_node_id = NodeIndex(std::cmp::max(genome_1.next_node_id.0, genome_2.next_node_id.0));
+    let new_genome = Genome{data: new_genome_data, next_node_id: new_next_node_id};
     new_genome
 }
 
@@ -238,7 +287,7 @@ pub fn genome_distance(genome_1: &Genome, genome_2: &Genome, excess_coef: f64, d
     };
 
     let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
-    allign_indexmap_iter(&genome_1.0, &genome_2.0, &get_id, &mut increment_counters);
+    allign_indexmap_iter(&genome_1.data, &genome_2.data, &get_id, &mut increment_counters);
 
     let n = std::cmp::max(n1, n2) as f64;
     let excess_term = excess_coef * (excess_count as f64) / n;
@@ -246,6 +295,8 @@ pub fn genome_distance(genome_1: &Genome, genome_2: &Genome, excess_coef: f64, d
     let weight_term = weight_diff_coef * total_weight_diff / n;
     excess_term + disjoint_term + weight_term
 }
+
+
 
 #[cfg(test)]
 mod tests {
@@ -263,6 +314,6 @@ mod tests {
     #[test]
     fn test_genome_max_node_id() {
         let genome = genome_sample_1();
-        assert_eq!(genome.calculate_max_node_id(), 4);
+        assert_eq!(genome.next_node_id.0, 5);
     }
 }

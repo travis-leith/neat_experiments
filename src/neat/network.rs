@@ -14,8 +14,7 @@ use rand::{distributions::{Distribution, Uniform}, RngCore};
 impl Network {
     pub fn create_from_genome(n_sensor_nodes: usize, n_output_nodes: usize, genome: Genome) -> Network {
         //TODO remove connections involving dead end nodes
-        let max_node_id = genome.calculate_max_node_id();
-        let mut phenome = Phenome::create_disconnected(n_sensor_nodes, n_output_nodes, max_node_id);
+        let mut phenome = Phenome::create_disconnected(n_sensor_nodes, n_output_nodes, genome.next_node_id.0);
 
         for (i, (gene_key, gene_val)) in genome.iter().enumerate() {
             if gene_val.enabled {
@@ -34,20 +33,7 @@ impl Network {
     }
 
     pub fn init(rng: &mut dyn RngCore, n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
-        let between = Uniform::from(-1.0..1.0);
-
-        let n_connections = n_sensor_nodes * n_output_nodes;
-        let mut genome : Genome = Genome::create(Vec::with_capacity(n_connections));
-
-        for out_node_ind in 0..n_output_nodes {
-            let out_node_id = out_node_ind + n_sensor_nodes;
-            for in_node_ind in 0..n_sensor_nodes {
-                let in_node_id = in_node_ind;
-                let innovation_number = out_node_ind * n_sensor_nodes + in_node_ind;
-                let gene = Gene::create(in_node_id, out_node_id, between.sample(rng), innovation_number, true);
-                genome.push(gene);
-            }
-        }
+        let genome = Genome::init(rng, n_sensor_nodes, n_output_nodes);
 
         Network::create_from_genome(n_sensor_nodes, n_output_nodes, genome)
     }
@@ -87,89 +73,6 @@ impl Network {
     
 
     // pub fun add_new_node
-}
-
-pub fn add_connection(mut network: Network, mut innovation_context: InnovationContext, in_node_id: NodeIndex, out_node_id: NodeIndex, weight: f64) -> (Network, InnovationContext) {
-    debug_assert!(in_node_id != out_node_id, "Tried to add a connection where input is the same node as output");
-    debug_assert!(in_node_id.0 < network.n_sensor_nodes || in_node_id.0 >= (network.n_sensor_nodes + network.n_output_nodes), "Tried to add a connection that inputs from an output node");
-    debug_assert!(out_node_id.0 >= network.n_sensor_nodes, "Tried to add a connection that outputs to a sensor node");
-    debug_assert!(out_node_id.0 < network.phenome.len(), "Tried to add a connection that outputs beyond node count");
-
-    // let out_node = &mut network.nodes[out_node_id];
-    // if !out_node.input_node_ids.contains(&in_node_id) {
-    //     let new_key = (in_node_id, out_node_id);
-    //     // let new_innnov = InnovationNumber(global_innovation.len());
-
-    //     let innov_number = 
-    //         match innovation_record.try_insert(new_key, global_innovation.clone()) {
-    //             Ok(i) => {
-    //                 // println!("adding key: {in_node_id},{out_node_id} and value {}", global_innovation.0);
-    //                 global_innovation.inc();
-    //                 i.clone()
-    //             },
-    //             Err(x) => {
-    //                 network.out_of_order = true;
-    //                 x.entry.get().clone()
-    //             }
-    //         }
-    //         ;
-    //     // println!("selected number {}", innov_number.0);
-    //     let new_conn = Connection{
-    //         in_node_id,
-    //         out_node_id,
-    //         weight,
-    //         innovation: innov_number,
-    //         enabled: true
-    //     };
-    //     let new_conn_ix = network.genome.len();
-        
-    //     out_node.input_connection_ids.insert(new_conn_ix);
-    //     out_node.input_node_ids.insert(in_node_id);
-    //     network.genome.push(new_conn);
-        
-    //     network
-    // } else {
-    //     network
-    // }
-    todo!()
-}
-
-
-pub fn add_node(mut network: Network, mut innovation_context: InnovationContext, existing_conn_index: GeneIndex) -> (Network, InnovationContext) {
-    // let in_node_id = network.genome[existing_conn_index].in_node_id;
-    // let out_node_id = network.genome[existing_conn_index].out_node_id;
-    // let weight = network.genome[existing_conn_index].weight;
-
-    // let genome = &mut network.genome[..];
-    // let nodes = &mut network.nodes[..];
-    // let existing_conn = &mut genome[existing_conn_index];
-    // if !existing_conn.enabled {
-    //     return network
-    // }
-    
-    // let new_node_id = nodes.len();
-    // let output_node = &mut nodes[existing_conn.out_node_id];
-    
-    // let new_hidden_node = Node{
-    //     has_active_inputs: false,
-    //     input_connection_ids: FxHashSet::default(),
-    //     input_node_ids: FxHashSet::default(),
-    //     is_active: false,
-    //     active_sum: 0.,
-    //     value: 0.,
-    // };
-
-    // existing_conn.enabled = false;
-    // output_node.input_connection_ids.remove(&existing_conn_index);
-    // output_node.input_node_ids.remove(&in_node_id);
-
-    // network.nodes.push(new_hidden_node);
-
-    // let new_network = add_connection(network, in_node_id, new_node_id, 1., global_innovation, innovation_record);
-
-    // add_connection(new_network, new_node_id, out_node_id, weight, global_innovation, innovation_record)
-    todo!()
-
 }
 
 // pub fn cross_over(rng: &mut dyn RngCore, network_1: &Network, fitness_1: usize, network_2: &Network, fitness_2: usize) -> Network {

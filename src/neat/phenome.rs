@@ -12,13 +12,16 @@ pub enum NodeType{
 #[derive(PartialEq, PartialOrd, Clone, Copy, Hash, Eq)]
 pub struct NodeIndex(pub usize);
 
+impl NodeIndex {
+    pub fn inc(self) -> NodeIndex {
+        NodeIndex(self.0 + 1)
+    }
+}
+
 #[derive(Default)]
 pub struct Node {
     pub value: f64,
-    // pub is_active: bool,
-    // pub has_active_inputs: bool,
     pub inputs: Vec<GeneIndex>,
-    // pub active_sum: f64,
     pub node_type: NodeType,
 }
 
@@ -26,10 +29,7 @@ impl Node {
     fn create(node_type: NodeType) -> Node {
         Node{
             value: 0.,
-            // is_active: node_type == NodeType::Sensor,
-            // has_active_inputs: false,
             inputs: Vec::new(),
-            // active_sum: 0.,
             node_type,
         }
     }
@@ -37,9 +37,9 @@ impl Node {
 
 pub struct Phenome(Vec<Node>);
 impl Phenome {
-    pub fn create_disconnected(n_sensor_nodes: usize, n_output_nodes: usize, max_node_id: usize) -> Phenome {
+    pub fn create_disconnected(n_sensor_nodes: usize, n_output_nodes: usize, last_node_id: usize) -> Phenome {
         let hidden_start = n_sensor_nodes + n_output_nodes;
-        let nodes: Vec<Node> = (0 .. max_node_id + 1).map(|i:usize|{
+        let nodes: Vec<Node> = (0 .. last_node_id).map(|i:usize|{
             if i < n_sensor_nodes {
                 Node::create(NodeType::Sensor)
             } else if i < hidden_start {
