@@ -7,14 +7,14 @@ use super::network::Network;
 
 pub struct Organism {
     pub network: Network,
-    pub fitness: usize
+    pub fitness: f64
 }
 
 impl Organism {
     pub fn init(rng: &mut dyn RngCore , n_sensor_nodes: usize, n_output_nodes: usize) -> Organism {
         Organism { 
             network: Network::init(rng, n_sensor_nodes, n_output_nodes),
-            fitness: 0
+            fitness: 0.
          }
     }
 
@@ -22,15 +22,3 @@ impl Organism {
         self.network.activate(sensor_values)
     }
 }
-
-
-use super::vector::{AllignedPair, allign};
-
-// pub fn cross_over(rng: &mut dyn RngCore, organism_1: &Organism, organism_2: &Organism) -> Organism {
-   
-//     let new_network = super::network::cross_over(rng, &organism_1.network, organism_1.fitness, &organism_2.network, organism_2.fitness);
-//     Organism {
-//         network: new_network,
-//         fitness: 0
-//     }
-// }

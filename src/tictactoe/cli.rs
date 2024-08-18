@@ -37,18 +37,19 @@ fn get_valid_input_from_user<T>(f:fn() -> Option<T>) -> T {
     }
 }
 
+fn read_line_from_stdin() -> io::Result<String> {
+    let stdin = io::stdin();
+    stdin.lock().lines().next().unwrap_or_else(|| Ok(String::new()))
+}
+
 fn get_yes_no_from_user(message: &str) -> Option<bool> {
     println!("Yes or No\n{message}");
-    let stdin = io::stdin();
-    let mut iterator = stdin.lock().lines();
-    let line1 = iterator.next().unwrap().unwrap();
+    let line = read_line_from_stdin().unwrap_or_default();
 
-    match line1.to_lowercase().as_str() {
-        "yes" => Some(true),
-        "y"   => Some(true),
-        "no"  => Some(false),
-        "n"   => Some(false),
-        _     => None
+    match line.to_lowercase().as_str() {
+        "yes" | "y"   => Some(true),
+        "no" | "n"   => Some(false),
+        _ => None
     }
 }
 
@@ -87,18 +88,17 @@ fn string_to_player_move(s: String) -> Option<CellLocation> {
 
 fn maybe_get_user_move() -> Option<CellLocation> {
     println!("Select move from qweasdzxc");
-    let stdin = io::stdin();
-    let mut iterator = stdin.lock().lines();
-    let line1 = iterator.next().unwrap().unwrap();
+    let line = read_line_from_stdin().unwrap_or_default();
 
-    string_to_player_move(line1)
+    string_to_player_move(line)
 }
-use crossterm::{execute, terminal::{self, Clear}, ExecutableCommand};
+use crossterm::{execute, terminal::{Clear, ClearType}};
 
 fn clear_screen() {
-    // print!("{}[2J", 27 as char);
-    let x = Clear(terminal::ClearType::All);
-    let _y_ = stdout().execute(x);
+    match execute!(stdout(), Clear(ClearType::Purge)) {
+        Ok(_) => (),
+        Err(e) => eprintln!("Error clearing screen: {e}")
+    }
 }
 
 pub fn get_user_move(gameboard: &GameBoard) -> CellLocation {

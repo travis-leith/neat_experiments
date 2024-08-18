@@ -55,6 +55,7 @@ impl GeneExt for Gene {
     }
 }
 
+#[derive(Clone)]
 pub struct Genome{
     data: FxIndexMap<GeneKey, GeneValue>,
     pub next_node_id: NodeIndex
@@ -100,15 +101,6 @@ impl Genome {
 
         Genome{data, next_node_id}
     }
-
-    // pub fn push(&mut self, gene: Gene) {
-    //     if gene.0.in_node_id >= self.next_node_id {
-    //         self.next_node_id = gene.0.in_node_id.inc()
-    //     } else if gene.0.out_node_id >= self.next_node_id {
-    //         self.next_node_id = gene.0.out_node_id.inc()
-    //     };
-    //     self.data.insert(gene.0, gene.1);
-    // }
 
     pub fn len(&self) -> usize {
         self.data.len()
@@ -160,9 +152,83 @@ impl Genome {
             self.add_connection(innovation_context, new_node_id, gene_key.out_node_id, gene_val.weight);
         }    
     }
+
+    pub fn distance(&self, other: &Genome, excess_coef: f64, disjoint_coef: f64, weight_diff_coef: f64) -> f64 {
+        #[derive(PartialEq, PartialOrd)]
+        enum ExcessSide {
+            Left,
+            Right,
+            Neither
+        }
+
+        let mut total_weight_diff = 0.;
+        let mut excess_side = ExcessSide::Neither;
+        let mut excess_count = 0;
+        let mut disjoint_count = 0;
+        let mut n1 = 0;
+        let mut n2 = 0;
+
+        let mut increment_counters =  |pair: AllignedTuplePair<GeneKey, GeneValue>| {
+            match pair {
+                AllignedTuplePair::HasBoth(left, right) => {
+                    let left_gene_value = left.1;
+                    let right_gene_value = right.1;
+                    n1 += 1;
+                    n2 += 1;
+                    excess_side = ExcessSide::Neither;
+                    disjoint_count = disjoint_count + excess_count;
+                    excess_count = 0;
+                    total_weight_diff = total_weight_diff + (left_gene_value.weight - right_gene_value.weight).abs();
+                },
+                AllignedTuplePair::HasLeft(_) => {
+                    n1 +=1;
+                    match excess_side {
+                        ExcessSide::Neither => {
+                            excess_side = ExcessSide::Left;
+                            excess_count = 1;
+                        },
+                        ExcessSide::Right => {
+                            excess_side = ExcessSide::Left;
+                            disjoint_count = disjoint_count + excess_count;
+                            excess_count = 1;
+                        },
+                        ExcessSide::Left => {
+                            excess_count += 1;
+                        }
+                    }
+                },
+                AllignedTuplePair::HasRight(_) => {
+                    n2 += 1;
+                    match excess_side {
+                        ExcessSide::Neither => {
+                            excess_side = ExcessSide::Right;
+                            excess_count = 1;
+                        },
+                        ExcessSide::Right => {
+                            excess_count += 1;
+                        },
+                        ExcessSide::Left => {
+                            excess_side = ExcessSide::Right;
+                            disjoint_count = disjoint_count + excess_count;
+                            excess_count = 1;
+                        }
+                    }
+                }
+            }
+        };
+
+        let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
+        allign_indexmap_iter(&self.data, &other.data, &get_id, &mut increment_counters);
+
+        let n = std::cmp::max(n1, n2) as f64;
+        let excess_term = excess_coef * (excess_count as f64) / n;
+        let disjoint_term = disjoint_coef * (disjoint_count as f64) / n;
+        let weight_term = weight_diff_coef * total_weight_diff / n;
+        excess_term + disjoint_term + weight_term
+    }
 }
 
-pub fn cross_over(rng: &mut dyn RngCore, genome_1: &Genome, fitness_1: usize, genome_2: &Genome, fitness_2: usize) -> Genome {
+pub fn cross_over(rng: &mut dyn RngCore, genome_1: &Genome, fitness_1: f64, genome_2: &Genome, fitness_2: f64) -> Genome {
     let between = Uniform::from(0.0..1.0);
     let mut choose_gene = |pair: AllignedTuplePair<GeneKey, GeneValue>| {
         let r = between.sample(rng);
@@ -221,81 +287,6 @@ pub fn cross_over(rng: &mut dyn RngCore, genome_1: &Genome, fitness_1: usize, ge
     let new_genome = Genome{data: new_genome_data, next_node_id: new_next_node_id};
     new_genome
 }
-
-pub fn genome_distance(genome_1: &Genome, genome_2: &Genome, excess_coef: f64, disjoint_coef: f64, weight_diff_coef: f64) -> f64 {
-    #[derive(PartialEq, PartialOrd)]
-    enum ExcessSide {
-        Left,
-        Right,
-        Neither
-    }
-
-    let mut total_weight_diff = 0.;
-    let mut excess_side = ExcessSide::Neither;
-    let mut excess_count = 0;
-    let mut disjoint_count = 0;
-    let mut n1 = 0;
-    let mut n2 = 0;
-
-    let mut increment_counters =  |pair: AllignedTuplePair<GeneKey, GeneValue>| {
-        match pair {
-            AllignedTuplePair::HasBoth(left, right) => {
-                let left_gene_value = left.1;
-                let right_gene_value = right.1;
-                n1 += 1;
-                n2 += 1;
-                excess_side = ExcessSide::Neither;
-                disjoint_count = disjoint_count + excess_count;
-                excess_count = 0;
-                total_weight_diff = total_weight_diff + (left_gene_value.weight - right_gene_value.weight).abs();
-            },
-            AllignedTuplePair::HasLeft(_) => {
-                n1 +=1;
-                match excess_side {
-                    ExcessSide::Neither => {
-                        excess_side = ExcessSide::Left;
-                        excess_count = 1;
-                    },
-                    ExcessSide::Right => {
-                        excess_side = ExcessSide::Left;
-                        disjoint_count = disjoint_count + excess_count;
-                        excess_count = 1;
-                    },
-                    ExcessSide::Left => {
-                        excess_count += 1;
-                    }
-                }
-            },
-            AllignedTuplePair::HasRight(_) => {
-                n2 += 1;
-                match excess_side {
-                    ExcessSide::Neither => {
-                        excess_side = ExcessSide::Right;
-                        excess_count = 1;
-                    },
-                    ExcessSide::Right => {
-                        excess_count += 1;
-                    },
-                    ExcessSide::Left => {
-                        excess_side = ExcessSide::Right;
-                        disjoint_count = disjoint_count + excess_count;
-                        excess_count = 1;
-                    }
-                }
-            }
-        }
-    };
-
-    let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
-    allign_indexmap_iter(&genome_1.data, &genome_2.data, &get_id, &mut increment_counters);
-
-    let n = std::cmp::max(n1, n2) as f64;
-    let excess_term = excess_coef * (excess_count as f64) / n;
-    let disjoint_term = disjoint_coef * (disjoint_count as f64) / n;
-    let weight_term = weight_diff_coef * total_weight_diff / n;
-    excess_term + disjoint_term + weight_term
-}
-
 
 
 #[cfg(test)]
