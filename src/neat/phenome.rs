@@ -1,7 +1,8 @@
 use std::ops::Index;
 use std::ops::IndexMut;
 use super::genome::GeneIndex;
-#[derive(PartialEq, Default)]
+
+#[derive(PartialEq, Default, Clone)]
 pub enum NodeType{
     Sensor,
     #[default]
@@ -18,7 +19,7 @@ impl NodeIndex {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Node {
     pub value: f64,
     pub inputs: Vec<GeneIndex>,
@@ -35,6 +36,7 @@ impl Node {
     }
 }
 
+#[derive(Clone)]
 pub struct Phenome(Vec<Node>);
 impl Phenome {
     pub fn create_disconnected(n_sensor_nodes: usize, n_output_nodes: usize, last_node_id: usize) -> Phenome {

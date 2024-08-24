@@ -8,7 +8,12 @@ pub enum AllignedPair<'a, T>{
     HasRight(&'a T),
 }
 
-pub fn allign<'a, T,I,R>(v1: &Vec<T>, v2: &Vec<T>, get_id: &'a dyn Fn(&T) -> I, map: &'a mut dyn FnMut(AllignedPair<T>) -> R) -> Vec<R> where I: std::cmp::PartialOrd{
+pub fn allign<'a, T, I, R, F, M>(v1: &Vec<T>, v2: &Vec<T>, get_id: &'a F, map: &'a mut M) -> Vec<R>
+where 
+    I: std::cmp::PartialOrd,
+    F: Fn(&T) -> I,
+    M: FnMut(AllignedPair<T>) -> R
+{
     let n1 = v1.len();
     let n2 = v2.len();
     let n_res = std::cmp::max(n1,n2);
@@ -64,7 +69,13 @@ pub enum AllignedTuplePair<'a, K, V> {
 
 type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 
-pub fn allign_indexmap_map<'a, K,V,I>(m1: &FxIndexMap<K,V>, m2: &FxIndexMap<K,V>, get_id: &'a dyn Fn((&K,&V)) -> I, map: &'a mut dyn FnMut(AllignedTuplePair<K,V>) -> Option<(K,V)>) -> FxIndexMap<K,V> where I: std::cmp::PartialOrd, K: std::cmp::Eq + std::hash::Hash{
+pub fn allign_indexmap_map<'a, K, V, I, F, M>(m1: &FxIndexMap<K,V>, m2: &FxIndexMap<K,V>, get_id: &'a F, map: &'a mut M) -> FxIndexMap<K,V> 
+where 
+    I: std::cmp::PartialOrd,
+    K: std::cmp::Eq + std::hash::Hash,
+    F: Fn((&K, &V)) -> I,
+    M: FnMut(AllignedTuplePair<K, V>) -> Option<(K, V)>,
+{
     let n1 = m1.len();
     let n2 = m2.len();
     let n_res = std::cmp::max(n1,n2);
@@ -120,7 +131,13 @@ pub fn allign_indexmap_map<'a, K,V,I>(m1: &FxIndexMap<K,V>, m2: &FxIndexMap<K,V>
     res
 }
 
-pub fn allign_indexmap_iter<'a, K,V,I>(m1: &FxIndexMap<K,V>, m2: &FxIndexMap<K,V>, get_id: &'a dyn Fn((&K,&V)) -> I, map: &'a mut dyn FnMut(AllignedTuplePair<K,V>) -> ()) where I: std::cmp::PartialOrd, K: std::cmp::Eq + std::hash::Hash{
+pub fn allign_indexmap_iter<'a, K, V, I, F, M>(m1: &FxIndexMap<K,V>, m2: &FxIndexMap<K,V>, get_id: &'a F, map: &'a mut M) 
+where 
+    I: std::cmp::PartialOrd,
+    K: std::cmp::Eq + std::hash::Hash,
+    F: Fn((&K,&V)) -> I,
+    M: FnMut(AllignedTuplePair<K,V>) -> ()
+{
     let n1 = m1.len();
     let n2 = m2.len();
     let mut i1 = 0;

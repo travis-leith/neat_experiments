@@ -1,5 +1,3 @@
-use std::ops::Index;
-use itertools::Itertools;
 use rand::RngCore;
 use rand_distr::{Distribution, Uniform};
 use indexmap::IndexMap;
@@ -81,7 +79,7 @@ impl Genome {
         Genome{data, next_node_id}
     }
 
-    pub fn init(rng: &mut dyn RngCore, n_sensor_nodes: usize, n_output_nodes: usize) -> Genome {
+    pub fn init<R: RngCore>(rng: &mut R, n_sensor_nodes: usize, n_output_nodes: usize) -> Genome {
         let between = Uniform::from(-1.0..1.0);
 
         let n_connections = n_sensor_nodes * n_output_nodes;
@@ -228,7 +226,7 @@ impl Genome {
     }
 }
 
-pub fn cross_over(rng: &mut dyn RngCore, genome_1: &Genome, fitness_1: f64, genome_2: &Genome, fitness_2: f64) -> Genome {
+pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: f64, genome_2: &Genome, fitness_2: f64) -> Genome {
     let between = Uniform::from(0.0..1.0);
     let mut choose_gene = |pair: AllignedTuplePair<GeneKey, GeneValue>| {
         let r = between.sample(rng);
@@ -264,22 +262,22 @@ pub fn cross_over(rng: &mut dyn RngCore, genome_1: &Genome, fitness_1: f64, geno
         }
     };
 
-    for i in 1 .. genome_1.len() {
+    // for i in 1 .. genome_1.len() {
         // if organism_1.network.genome[i].innovation.0 <= organism_1.network.genome[i-1].innovation.0 {
         //     println!("left {}", organism_1.network.genome[i].innovation.0);
         //     println!("right {}", organism_1.network.genome[i - 1].innovation.0);
         //     println!("found one")
         // }
         // debug_assert!(genome_1[GeneIndex(i)].innovation.0 > genome_1[GeneIndex(i-1)].innovation.0)
-    }
-    for i in 1 .. genome_2.len() {
+    // }
+    // for i in 1 .. genome_2.len() {
         // if organism_2.network.genome[i].innovation.0 <= organism_2.network.genome[i-1].innovation.0 {
         //     println!("left {}", organism_2.network.genome[i].innovation.0);
         //     println!("right {}", organism_2.network.genome[i - 1].innovation.0);
         //     println!("found one")
         // }
         // debug_assert!(genome_2[GeneIndex(i)].innovation.0 > genome_2[GeneIndex(i-1)].innovation.0)
-    }
+    // }
 
     let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
     let new_genome_data = allign_indexmap_map(&genome_1.data, &genome_2.data, &get_id, &mut choose_gene);

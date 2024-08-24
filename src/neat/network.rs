@@ -2,6 +2,7 @@ use super::genome::{Gene, GeneExt, GeneIndex, Genome};
 use super::phenome::{Phenome, NodeIndex, NodeType};
 use super::innovation::{InnovationNumber, InnovationContext};
 
+#[derive(Clone)]
 pub struct Network {
     pub phenome: Phenome,
     pub genome: Genome,
@@ -32,13 +33,13 @@ impl Network {
         }
     }
 
-    pub fn init(rng: &mut dyn RngCore, n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
+    pub fn init<R: RngCore>(rng: &mut R, n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
         let genome = Genome::init(rng, n_sensor_nodes, n_output_nodes);
 
         Network::create_from_genome(n_sensor_nodes, n_output_nodes, genome)
     }
 
-    pub fn activate(&mut self, inputs: Vec<f64>) {
+    pub fn activate(&mut self, inputs: &Vec<f64>) -> Vec<f64> {
         fn relu(x: f64) -> f64 {
             if x > 0.0 {
                 x
@@ -68,20 +69,15 @@ impl Network {
                 self.phenome[*node_index].value = relu(active_sum);
             }
         }
+
+        let outputs = self.phenome.iter().skip(self.n_sensor_nodes).take(self.n_output_nodes).map(|node| node.value).collect();
+        outputs
     }
 
     
 
     // pub fun add_new_node
 }
-
-// pub fn cross_over(rng: &mut dyn RngCore, network_1: &Network, fitness_1: usize, network_2: &Network, fitness_2: usize) -> Network {
-//     debug_assert!(network_1.n_output_nodes == network_2.n_output_nodes, "Organisms with mismatching output size cannot be crossed");
-//     debug_assert!(network_1.n_sensor_nodes == network_2.n_sensor_nodes, "Organisms with mismatching input size cannot be crossed");
-
-//     let new_genome = super::genome::cross_over(rng, &network_1.genome, fitness_1, &network_2.genome, fitness_2);
-//     Network::create_from_genome(network_1.n_sensor_nodes, network_1.n_output_nodes, new_genome)
-// }
 
 #[cfg(test)]
 mod tests {
@@ -152,9 +148,12 @@ mod tests {
         let genome = genome_sample_feed_forward_1();
         let mut network =  Network::create_from_genome(n_sensors, n_outputs, genome);
 
-        network.activate(vec![0.5, -0.2]);
+        let output = network.activate(&vec![0.5, -0.2]);
         assert_approx_eq!(network.phenome[NodeIndex(2)].value, 0.184);
         assert_approx_eq!(network.phenome[NodeIndex(3)].value, 0.);
+
+        assert_approx_eq!(output[0], 0.184);
+        assert_approx_eq!(output[1], 0.);
     }
 
     #[test]
@@ -163,14 +162,14 @@ mod tests {
         let mut network =  Network::create_from_genome(2, 1, genome);
 
         let inputs = vec![-0.9, 0.6];
-        network.activate(inputs.clone());
-        assert_approx_eq!(network.phenome[NodeIndex(2)].value, 0.);
+        let mut outputs = network.activate(&inputs);
+        assert_approx_eq!(outputs[0], 0.);
 
-        network.activate(inputs.clone());
-        assert_approx_eq!(network.phenome[NodeIndex(2)].value, 0.0216);
+        outputs = network.activate(&inputs);
+        assert_approx_eq!(outputs[0], 0.0216);
 
-        network.activate(inputs.clone());
-        assert_approx_eq!(network.phenome[NodeIndex(2)].value, 0.0168);
+        outputs = network.activate(&inputs);
+        assert_approx_eq!(outputs[0], 0.0168);
         
     }
 }

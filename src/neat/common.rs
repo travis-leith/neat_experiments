@@ -216,13 +216,13 @@ impl Network {
         all_active
     }
 
-    pub fn activate(&mut self, sensor_values: Vec<f64>) {
+    pub fn activate(&mut self, sensor_values: &Vec<f64>) {
         let bias_offset = if self.has_bias_node {1} else {0};
         debug_assert!(sensor_values.len() + bias_offset == self.n_sensor_nodes, "sensor values not the right length for network");
         // set the sensor values
         self.nodes[0].value = 1.; //TODO this does not need to happen on each activation
         for (i, value) in sensor_values.into_iter().enumerate() {
-            self.nodes[i + bias_offset].value = value;
+            self.nodes[i + bias_offset].value = *value;
         }
         
         let mut remaining_iterations = 5;
@@ -350,7 +350,7 @@ impl Organism {
         Organism { network: Network::init(rng, n_sensor_nodes, n_output_nodes, has_bias_node), fitness: 0 }
     }
 
-    pub fn activate(&mut self, sensor_values: Vec<f64>) {
+    pub fn activate(&mut self, sensor_values: &Vec<f64>) {
         self.network.activate(sensor_values);
     }
 }
@@ -643,7 +643,7 @@ mod tests {
 
         assert_eq!(network.genome.len(), 8);
 
-        network.activate(vec![0.5, -0.2]);
+        network.activate(&vec![0.5, -0.2]);
         assert_approx_eq!(network.nodes[2].value, 0.184);
         assert_approx_eq!(network.nodes[3].value, 0.);
         assert_eq!(inno_rec.len(), 8);
@@ -665,7 +665,7 @@ mod tests {
         let network = add_connection(network, 3, 5, 0.5, &mut global_innov, &mut inno_rec);
         let mut network = add_connection(network, 5, 4, -0.1, &mut global_innov, &mut inno_rec);
         
-        network.activate(vec![-0.9, 0.6]);
+        network.activate(&vec![-0.9, 0.6]);
         let first_output_ix = network.n_sensor_nodes;
         assert_approx_eq!(network.nodes[first_output_ix].value, 0.0216);
     }
