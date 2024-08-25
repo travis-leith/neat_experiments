@@ -27,4 +27,24 @@ impl InnovationContext {
             Err(i) => i.entry.get().clone()
         }
     }
+
+    pub fn init(n_sensor_nodes: usize, n_output_nodes: usize) -> InnovationContext {
+        let mut innovation_map = FxHashMap::default();
+        let mut innovation_number = InnovationNumber(0);
+
+        for i in 0..n_sensor_nodes {
+            for j in 0..n_output_nodes {
+                let in_node_id = NodeIndex(i);
+                let out_node_id = NodeIndex(j + n_sensor_nodes);
+                let gene_key = GeneKey{in_node_id, out_node_id};
+                innovation_map.insert(gene_key, innovation_number);
+                innovation_number = innovation_number.inc();
+            }
+        }
+
+        InnovationContext {
+            next_innovation_number: innovation_number,
+            innovation_map
+        }
+    }
 }

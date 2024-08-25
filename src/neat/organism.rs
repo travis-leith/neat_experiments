@@ -19,9 +19,9 @@ impl Organism {
          }
     }
 
-    pub fn create_from_genome(n_sensor_nodes: usize, n_output_nodes: usize, genome: Genome) -> Organism {
+    pub fn create_from_genome(genome: Genome) -> Organism {
         Organism {
-            network: Network::create_from_genome(n_sensor_nodes, n_output_nodes, genome),
+            network: Network::create_from_genome(genome),
             fitness: 0.
         }
     }

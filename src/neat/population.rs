@@ -1,17 +1,11 @@
-use super::{genome::{self, Genome}, organism::{self, Organism}, species::Species};
+use super::{common::Settings, genome, innovation::InnovationContext, organism::Organism, species::Species};
 use rand::RngCore;
-pub struct Settings {
-    pub excess_coefficient: f64,
-    pub disjoint_coefficient: f64,
-    pub weight_coefficient: f64,
-    pub n_organisms: usize,
-    pub n_sensor_nodes: usize,
-    pub n_output_nodes: usize
-}
+
 pub struct Population {
     pub species: Vec<Species>,
     species_distance_threshold: f64,
-    pub generation: usize
+    pub generation: usize,
+    innovation_context: InnovationContext
 }
 
 //trait to evaluate the fitness of an organism
@@ -41,16 +35,20 @@ impl Population {
     }
 
     pub fn init<R: RngCore>(rng: &mut R, settings: &Settings) -> Population {
+        let innovation_context = InnovationContext::init(settings.n_sensor_nodes, settings.n_output_nodes);
         let mut population = Population {
             species: Vec::new(),
             species_distance_threshold: 0.3,
-            generation: 0
+            generation: 0,
+            innovation_context
         };
 
         for _ in 0..settings.n_organisms {
             let organism = Organism::init(rng, settings.n_sensor_nodes, settings.n_output_nodes);
             population.add_organism(&settings, organism);
         }
+
+        
 
         population
     }
@@ -86,8 +84,9 @@ impl Population {
             for _ in 0..n_offspring {
                 let parent_1 = &s.members[s.champion];
                 let parent_2 = &s.members[s.champion];
-                let child_genome = genome::cross_over(rng, &parent_1.network.genome, parent_1.fitness, &parent_2.network.genome, parent_2.fitness);
-                let child = Organism::create_from_genome(settings.n_sensor_nodes, settings.n_output_nodes, child_genome);
+                let mut child_genome = genome::cross_over(rng, &parent_1.network.genome, parent_1.fitness, &parent_2.network.genome, parent_2.fitness);
+                child_genome.mutate(rng, &mut self.innovation_context, settings);
+                let child = Organism::create_from_genome(child_genome);
                 new_population.push(child);
             }
         }
@@ -103,5 +102,19 @@ impl Population {
         for organism in new_population {
             self.add_organism(settings, organism);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::neat::{common::Settings, population::Population};
+
+    #[test]
+    fn test_init() {
+        let settings = Settings::standard();
+        let mut rng = rand::thread_rng();
+        let population = Population::init(&mut rng, &settings);
+        assert_eq!(population.innovation_context.innovation_map.len(), settings.n_sensor_nodes * settings.n_output_nodes);
+        assert_eq!(population.innovation_context.next_innovation_number.0, settings.n_sensor_nodes * settings.n_output_nodes);
     }
 }

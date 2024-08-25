@@ -7,15 +7,13 @@ pub struct Network {
     pub phenome: Phenome,
     pub genome: Genome,
     pub activation_order: Vec<Vec<NodeIndex>>,
-    pub n_sensor_nodes: usize,
-    pub n_output_nodes: usize,
 }
 
 use rand::{distributions::{Distribution, Uniform}, RngCore};
 impl Network {
-    pub fn create_from_genome(n_sensor_nodes: usize, n_output_nodes: usize, genome: Genome) -> Network {
+    pub fn create_from_genome(genome: Genome) -> Network {
         //TODO remove connections involving dead end nodes
-        let mut phenome = Phenome::create_disconnected(n_sensor_nodes, n_output_nodes, genome.next_node_id.0);
+        let mut phenome = Phenome::create_disconnected(genome.n_sensor_nodes, genome.n_output_nodes, genome.next_node_id.0);
 
         for (i, (gene_key, gene_val)) in genome.iter().enumerate() {
             if gene_val.enabled {
@@ -27,16 +25,14 @@ impl Network {
         Network {
             phenome,
             genome,
-            activation_order,
-            n_sensor_nodes,
-            n_output_nodes,
+            activation_order
         }
     }
 
     pub fn init<R: RngCore>(rng: &mut R, n_sensor_nodes: usize, n_output_nodes: usize) -> Network {
         let genome = Genome::init(rng, n_sensor_nodes, n_output_nodes);
 
-        Network::create_from_genome(n_sensor_nodes, n_output_nodes, genome)
+        Network::create_from_genome(genome)
     }
 
     pub fn activate(&mut self, inputs: &Vec<f64>) -> Vec<f64> {
@@ -70,7 +66,7 @@ impl Network {
             }
         }
 
-        let outputs = self.phenome.iter().skip(self.n_sensor_nodes).take(self.n_output_nodes).map(|node| node.value).collect();
+        let outputs = self.phenome.iter().skip(self.genome.n_sensor_nodes).take(self.genome.n_output_nodes).map(|node| node.value).collect();
         outputs
     }
 
@@ -92,7 +88,7 @@ mod tests {
             Gene::create(5, 3, -0.9, 3, true),
             Gene::create(0, 5, 0.6, 4, true),
             Gene::create(5, 2, 0.4, 5, true),
-        ])
+        ], 3, 1)
     }
 
     fn genome_sample_recurrent_1() -> Genome{
@@ -104,18 +100,13 @@ mod tests {
             Gene::create(0, 4, -0.8, 4, true),
             Gene::create(3, 5, 0.5, 5, true),
             Gene::create(5, 4, -0.1, 6, true),
-        ])
+        ], 2, 1)
     }
 
     #[test]
     fn network_creation() {
-        let n_sensors = 3;
-        let n_outputs = 1;
-        
-        let network =  Network::create_from_genome(n_sensors, n_outputs, genome_sample_feed_forward_1());
+        let network =  Network::create_from_genome(genome_sample_feed_forward_1());
         assert_eq!(network.phenome.len(), 6);
-        assert_eq!(network.n_output_nodes, n_outputs);
-        assert_eq!(network.n_sensor_nodes, n_sensors);
         assert_eq!(network.phenome[NodeIndex(2)].inputs.len(), 1);
         assert_eq!(network.phenome[NodeIndex(3)].inputs.len(), 2);
         assert_eq!(network.phenome[NodeIndex(4)].inputs.len(), 1);
@@ -131,10 +122,10 @@ mod tests {
         assert_eq!(network.genome.get_index(GeneIndex(89)).1.innovation.0, 89);
         assert_eq!(network.genome.len(), 90);
         assert_eq!(network.phenome.len(), n_total);
-        assert_eq!(network.n_output_nodes, n_output_nodes);
-        assert_eq!(network.n_sensor_nodes, n_sensor_nodes);
+        assert_eq!(network.genome.n_output_nodes, n_output_nodes);
+        assert_eq!(network.genome.n_sensor_nodes, n_sensor_nodes);
 
-        for node_index in network.n_sensor_nodes..network.phenome.len() {
+        for node_index in network.genome.n_sensor_nodes..network.phenome.len() {
             let node = &network.phenome[NodeIndex(node_index)];
             let l = node.inputs.len();
             assert_eq!(l, n_sensor_nodes)
@@ -143,10 +134,8 @@ mod tests {
 
     #[test]
     fn feed_forward() {
-        let n_sensors = 2;
-        let n_outputs = 2;
         let genome = genome_sample_feed_forward_1();
-        let mut network =  Network::create_from_genome(n_sensors, n_outputs, genome);
+        let mut network =  Network::create_from_genome(genome);
 
         let output = network.activate(&vec![0.5, -0.2]);
         assert_approx_eq!(network.phenome[NodeIndex(2)].value, 0.184);
@@ -159,7 +148,7 @@ mod tests {
     #[test]
     fn recurrent() {
         let genome = genome_sample_recurrent_1();
-        let mut network =  Network::create_from_genome(2, 1, genome);
+        let mut network =  Network::create_from_genome(genome);
 
         let inputs = vec![-0.9, 0.6];
         let mut outputs = network.activate(&inputs);

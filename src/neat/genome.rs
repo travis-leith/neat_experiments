@@ -1,5 +1,5 @@
-use rand::RngCore;
-use rand_distr::{Distribution, Uniform};
+use rand::{RngCore, Rng};
+use rand_distr::{Distribution, Normal, Uniform};
 use indexmap::IndexMap;
 use fxhash::FxBuildHasher;
 
@@ -7,7 +7,7 @@ type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 
 use crate::neat::vector::{AllignedTuplePair, allign_indexmap_map, allign_indexmap_iter};
 
-use super::{innovation::{InnovationContext, InnovationNumber}, phenome::NodeIndex};
+use super::{common::Settings, innovation::{InnovationContext, InnovationNumber}, phenome::NodeIndex};
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct GeneIndex(pub usize);
@@ -56,7 +56,9 @@ impl GeneExt for Gene {
 #[derive(Clone)]
 pub struct Genome{
     data: FxIndexMap<GeneKey, GeneValue>,
-    pub next_node_id: NodeIndex
+    pub next_node_id: NodeIndex,
+    pub n_sensor_nodes: usize,
+    pub n_output_nodes: usize,
 }
 
 impl Genome {
@@ -64,7 +66,7 @@ impl Genome {
         self.data.iter()
     }
 
-    pub fn create(genes: Vec<Gene>) -> Genome {
+    pub fn create(genes: Vec<Gene>, n_sensor_nodes: usize, n_output_nodes: usize) -> Genome {
         let max_node_id = genes.iter().fold(NodeIndex(0), |acc, (gene_key, _)| {
             if gene_key.in_node_id > acc {
                 gene_key.in_node_id
@@ -76,7 +78,7 @@ impl Genome {
         });
         let data = genes.into_iter().collect();
         let next_node_id = max_node_id.inc();
-        Genome{data, next_node_id}
+        Genome{data, next_node_id, n_sensor_nodes, n_output_nodes}
     }
 
     pub fn init<R: RngCore>(rng: &mut R, n_sensor_nodes: usize, n_output_nodes: usize) -> Genome {
@@ -97,7 +99,7 @@ impl Genome {
 
         let next_node_id = NodeIndex(n_sensor_nodes + n_output_nodes);
 
-        Genome{data, next_node_id}
+        Genome{data, next_node_id, n_sensor_nodes, n_output_nodes}
     }
 
     pub fn len(&self) -> usize {
@@ -126,6 +128,7 @@ impl Genome {
         debug_assert!(in_node_id != out_node_id, "Tried to add a connection where input is the same node as output");
         debug_assert!(in_node_id < self.next_node_id, "Tried to add a connection with an input node that does not exist");
         debug_assert!(out_node_id < self.next_node_id, "Tried to add a connection with an output node that does not exist");
+        debug_assert!(out_node_id.0 >= self.n_sensor_nodes, "Tried to add a connection with an output node that is a sensor node");
 
         let gene_key = GeneKey {
             in_node_id,
@@ -146,6 +149,7 @@ impl Genome {
     
         if gene_val.enabled {
             let new_node_id = self.next_node_id;
+            self.next_node_id = self.next_node_id.inc();
             self.add_connection(innovation_context, gene_key.in_node_id, new_node_id, 1.);
             self.add_connection(innovation_context, new_node_id, gene_key.out_node_id, gene_val.weight);
         }    
@@ -224,6 +228,46 @@ impl Genome {
         let weight_term = weight_diff_coef * total_weight_diff / n;
         excess_term + disjoint_term + weight_term
     }
+
+    pub fn mutate<R: RngCore>(&mut self, rng: &mut R, innovation_context: &mut InnovationContext, settings: &Settings) {
+        let between = Uniform::from(0.0..1.0);
+        self.mutate_add_connection(rng, &between, innovation_context, settings);
+        self.mutate_add_node(rng, &between, innovation_context, settings);
+        self.mutate_weight(rng, &between, settings);
+    }
+
+    fn mutate_add_connection<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, innovation_context: &mut InnovationContext, settings: &Settings) {
+        let r = between.sample(rng);
+        if r < settings.mutate_add_connection_rate {
+            let in_node_id = NodeIndex(rng.gen_range(0..self.next_node_id.0));
+            let out_node_id = NodeIndex(rng.gen_range(self.n_sensor_nodes..self.next_node_id.0));
+            if in_node_id != out_node_id {
+                let gene_key = GeneKey{in_node_id, out_node_id};
+                if !self.data.contains_key(&gene_key) {
+                    self.add_connection(innovation_context, in_node_id, out_node_id, rng.gen_range(-1.0..1.0));
+                }
+            }
+        }
+    }
+
+    fn mutate_add_node<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, innovation_context: &mut InnovationContext, settings: &Settings) {
+        let r = between.sample(rng);
+        if r < settings.mutate_add_node_rate {
+            let gene_index = GeneIndex(rng.gen_range(0..self.len()));
+            self.add_node(innovation_context, gene_index);
+        }
+    }
+
+    fn mutate_weight<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, settings: &Settings) {
+        let normal = Normal::new(0., settings.mutate_weight_scale).unwrap();
+        for (_, gene_value) in self.data.iter_mut() {
+            let r = between.sample(rng);
+            if r < settings.mutate_weight_rate {
+                //generate guassian random number
+                gene_value.weight += normal.sample(rng);
+            }
+        }
+    }
 }
 
 pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: f64, genome_2: &Genome, fitness_2: f64) -> Genome {
@@ -262,27 +306,12 @@ pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: f64, ge
         }
     };
 
-    // for i in 1 .. genome_1.len() {
-        // if organism_1.network.genome[i].innovation.0 <= organism_1.network.genome[i-1].innovation.0 {
-        //     println!("left {}", organism_1.network.genome[i].innovation.0);
-        //     println!("right {}", organism_1.network.genome[i - 1].innovation.0);
-        //     println!("found one")
-        // }
-        // debug_assert!(genome_1[GeneIndex(i)].innovation.0 > genome_1[GeneIndex(i-1)].innovation.0)
-    // }
-    // for i in 1 .. genome_2.len() {
-        // if organism_2.network.genome[i].innovation.0 <= organism_2.network.genome[i-1].innovation.0 {
-        //     println!("left {}", organism_2.network.genome[i].innovation.0);
-        //     println!("right {}", organism_2.network.genome[i - 1].innovation.0);
-        //     println!("found one")
-        // }
-        // debug_assert!(genome_2[GeneIndex(i)].innovation.0 > genome_2[GeneIndex(i-1)].innovation.0)
-    // }
+    
 
     let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
     let new_genome_data = allign_indexmap_map(&genome_1.data, &genome_2.data, &get_id, &mut choose_gene);
     let new_next_node_id = NodeIndex(std::cmp::max(genome_1.next_node_id.0, genome_2.next_node_id.0));
-    let new_genome = Genome{data: new_genome_data, next_node_id: new_next_node_id};
+    let new_genome = Genome{data: new_genome_data, next_node_id: new_next_node_id, n_sensor_nodes:genome_1.n_sensor_nodes, n_output_nodes:genome_1.n_output_nodes};
     new_genome
 }
 
@@ -297,12 +326,36 @@ mod tests {
             Gene::create(1, 4, 0.0, 2, true),
             Gene::create(2, 4, 0.0, 3, true),
             Gene::create(3, 4, 0.0, 4, true),
-        ])
+        ], 2, 2)
     } 
     
     #[test]
     fn test_genome_max_node_id() {
         let genome = genome_sample_1();
         assert_eq!(genome.next_node_id.0, 5);
+    }
+
+    #[test]
+    fn test_genome_init() {
+        let mut rng = rand::thread_rng();
+        let genome = Genome::init(&mut rng, 2, 2);
+        assert_eq!(genome.next_node_id.0, 4);
+        assert_eq!(genome.len(), 4);
+    }
+
+    #[test]
+    fn test_genome_add_connection() {
+        let mut genome = genome_sample_1();
+        let mut innovation_context = InnovationContext::init(2, 2);
+        genome.add_connection(&mut innovation_context, NodeIndex(0), NodeIndex(4), 0.0);
+        assert_eq!(genome.len(), 6);
+    }
+
+    #[test]
+    fn test_genome_add_node() {
+        let mut genome = genome_sample_1();
+        let mut innovation_context = InnovationContext::init(2, 2);
+        genome.add_node(&mut innovation_context, GeneIndex(0));
+        assert_eq!(genome.len(), 7);
     }
 }
