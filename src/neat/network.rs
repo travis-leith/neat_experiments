@@ -1,6 +1,5 @@
-use super::genome::{Gene, GeneExt, GeneIndex, Genome};
+use super::genome::{GeneIndex, Genome};
 use super::phenome::{Phenome, NodeIndex, NodeType};
-use super::innovation::{InnovationNumber, InnovationContext};
 
 #[derive(Clone)]
 pub struct Network {
@@ -9,7 +8,7 @@ pub struct Network {
     pub activation_order: Vec<Vec<NodeIndex>>,
 }
 
-use rand::{distributions::{Distribution, Uniform}, RngCore};
+use rand::RngCore;
 impl Network {
     pub fn create_from_genome(genome: Genome) -> Network {
         //TODO remove connections involving dead end nodes
@@ -77,7 +76,7 @@ impl Network {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::neat::{genome::{Gene, GeneExt, GeneIndex, Genome}, network::Network, phenome::NodeIndex};
     use assert_approx_eq::assert_approx_eq;
 
     fn genome_sample_feed_forward_1() -> Genome{
@@ -88,7 +87,7 @@ mod tests {
             Gene::create(5, 3, -0.9, 3, true),
             Gene::create(0, 5, 0.6, 4, true),
             Gene::create(5, 2, 0.4, 5, true),
-        ], 3, 1)
+        ], 2, 2)
     }
 
     fn genome_sample_recurrent_1() -> Genome{

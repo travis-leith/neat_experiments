@@ -22,47 +22,35 @@ mod test {
         }
     }
 
+    fn describe_population(population: &Population) {
+        println!("generation: {:?}; n_species: {:?}", population.generation, population.species.len());
+        for (i, s) in population.species.iter().enumerate() {
+            println!("\tspecies: {:?}", i);
+            println!("\tnumber of members: {:?}", s.members.len());
+            println!("\tchampion fitness: {:?}", population.organisms[s.champion].fitness);
+            println!("\taverage fitness: {:?}", s.avg_fitness);
+            println!("");
+        }
+        println!("");
+        println!("");
+    }
 
     #[test]
     fn test_xor() {
-        let settings = Settings {
-            excess_coefficient: 1.0,
-            disjoint_coefficient: 1.0,
-            weight_coefficient: 0.4,
-            n_organisms: 100,
-            n_sensor_nodes: 3,
-            n_output_nodes: 1,
-            mutate_weight_rate: 0.2,
-            mutate_add_connection_rate: 0.2,
-            mutate_add_node_rate: 0.2,
-            mutate_weight_scale: 0.1,
-        };
+        let mut settings = Settings::standard();
+        settings.n_organisms = 1000;
     
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(2);
         let mut population = Population::init(&mut rng, &settings);
 
-        for i in 0..5 {
-            println!("number of species: {:?}", population.species.len());
-            population.evaluate(&XorEvaluator);
-            println!("generation: {:?}", i);
+        population.evaluate(&XorEvaluator);        
+        describe_population(&population);
 
-            for s in population.species.iter_mut() {
-                println!("number of members: {:?}", s.members.len());
-                println!("champion fitness: {:?}", s.members[s.champion].fitness);
-                println!("average fitness: {:?}", s.avg_fitness);
-            }
-
+        for _ in 0..100 {
             population.next_generation(&mut rng, &settings);
-            println!("");
-        }
-        
-        population.evaluate(&XorEvaluator);
-        println!("generation: {:?}", 5);
 
-        for s in population.species.iter_mut() {
-            println!("number of members: {:?}", s.members.len());
-            println!("champion fitness: {:?}", s.members[s.champion].fitness);
-            println!("average fitness: {:?}", s.avg_fitness);
+            population.evaluate(&XorEvaluator);
+            describe_population(&population);
         }
 
     }
