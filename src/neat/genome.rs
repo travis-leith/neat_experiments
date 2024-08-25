@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use rand::{RngCore, Rng};
 use rand_distr::{Distribution, Normal, Uniform};
 use indexmap::IndexMap;
@@ -110,18 +111,109 @@ impl Genome {
         self.data.get_index(index.0).unwrap()
     }
 
-    pub fn tarjan_scc(&self) -> Vec<Vec<NodeIndex>> {
+    fn get_index_mut(&mut self, index: GeneIndex) -> (&GeneKey, &mut GeneValue) {
+        self.data.get_index_mut(index.0).unwrap()
+    }
+
+    pub fn tarjan_scc_(&self) -> Vec<Vec<NodeIndex>> {
         use petgraph::graph::DiGraph;
-        let edges = self.data.keys().map(|gene_key| (gene_key.in_node_id.0, gene_key.out_node_id.0));
+        let edges = 
+            self.data.iter().filter(|(_, gene)| gene.enabled).map(|(gene_key, _)| (gene_key.in_node_id.0, gene_key.out_node_id.0)).collect_vec();
         let graph: petgraph::graph::DiGraph<(), (), usize> = DiGraph::from_edges(edges);
 
 
         let scc_order = petgraph::algo::tarjan_scc(&graph);
-        scc_order.iter().rev().map(|scc| {
-            scc.iter().map(|node_index| {
-                NodeIndex(node_index.index())
-            }).collect()
-        }).collect()
+        let mut res: Vec<Vec<NodeIndex>> =
+            scc_order.iter().rev().map(|scc| {
+                scc.iter().map(|node_index| {
+                    NodeIndex(node_index.index())
+                }).collect()
+            }).collect();
+        res.retain(|scc| scc.len() > 0);
+        res
+    }
+
+    pub fn tarjan_scc(&self) -> Vec<Vec<NodeIndex>> {
+        // Define necessary structures and types
+        use rustc_hash::FxHashMap;
+
+        // Initialize variables
+        let mut index = 0;
+        let mut stack = Vec::new();
+        let mut indices = FxHashMap::default();
+        let mut low_links = FxHashMap::default();
+        let mut on_stack = FxHashMap::default();
+        let mut sccs = Vec::new();
+
+        // Define the recursive function `strong_connect`
+        fn strong_connect(
+            node: NodeIndex,
+            index: &mut usize,
+            stack: &mut Vec<NodeIndex>,
+            indices: &mut FxHashMap<NodeIndex, usize>,
+            low_links: &mut FxHashMap<NodeIndex, usize>,
+            on_stack: &mut FxHashMap<NodeIndex, bool>,
+            sccs: &mut Vec<Vec<NodeIndex>>,
+            graph: &FxHashMap<NodeIndex, Vec<NodeIndex>>,
+        ) {
+            // Set the depth index for `node` to the smallest unused index
+            indices.insert(node, *index);
+            low_links.insert(node, *index);
+            *index += 1;
+            stack.push(node);
+            on_stack.insert(node, true);
+
+            // Consider successors of `node`
+            if let Some(successors) = graph.get(&node) {
+                for &successor in successors {
+                    if !indices.contains_key(&successor) {
+                        // Successor has not yet been visited; recurse on it
+                        strong_connect(successor, index, stack, indices, low_links, on_stack, sccs, graph);
+                        let low_link_node = low_links.get(&node).unwrap().clone();
+                        let low_link_successor = low_links.get(&successor).unwrap().clone();
+                        low_links.insert(node, low_link_node.min(low_link_successor));
+                    } else if *on_stack.get(&successor).unwrap() {
+                        // Successor is in stack and hence in the current SCC
+                        let low_link_node = low_links.get(&node).unwrap().clone();
+                        let index_successor = indices.get(&successor).unwrap().clone();
+                        low_links.insert(node, low_link_node.min(index_successor));
+                    }
+                }
+            }
+
+            // If `node` is a root node, pop the stack and generate an SCC
+            if indices.get(&node) == low_links.get(&node) {
+                let mut scc = Vec::new();
+                loop {
+                    let w = stack.pop().unwrap();
+                    on_stack.insert(w, false);
+                    scc.push(w);
+                    if w == node {
+                        break;
+                    }
+                }
+                sccs.push(scc);
+            }
+        }
+
+        // Build the graph from the gene data
+        let mut graph: FxHashMap<NodeIndex, Vec<NodeIndex>> = FxHashMap::default();
+        for (gene_key, gene) in self.data.iter() {
+            if gene.enabled {
+                graph.entry(gene_key.in_node_id).or_default().push(gene_key.out_node_id);
+            }
+        }
+
+        // Iterate over all nodes and call `strong_connect` if the node is not yet visited
+        for &node in graph.keys() {
+            if !indices.contains_key(&node) {
+                strong_connect(node, &mut index, &mut stack, &mut indices, &mut low_links, &mut on_stack, &mut sccs, &graph);
+            }
+        }
+
+        // Return the list of SCCs
+        sccs.reverse();
+        sccs
     }
 
     pub fn add_connection(&mut self, innovation_context: &mut InnovationContext, in_node_id: NodeIndex, out_node_id: NodeIndex, weight: f64) {
@@ -143,8 +235,10 @@ impl Genome {
 
     pub fn add_node(&mut self, innovation_context: &mut InnovationContext, existing_conn_index: GeneIndex) {
         let (gene_key, gene_val) = {
-            let (gene_key, gene_val) = self.get_index(existing_conn_index);
-            (gene_key.clone(), gene_val.clone())
+            let (gene_key, gene_val) = self.get_index_mut(existing_conn_index);
+            let cloned_pair = (gene_key.clone(), gene_val.clone());
+            gene_val.enabled = false;
+            cloned_pair
         };
     
         if gene_val.enabled {
@@ -234,6 +328,7 @@ impl Genome {
         self.mutate_add_connection(rng, &between, innovation_context, settings);
         self.mutate_add_node(rng, &between, innovation_context, settings);
         self.mutate_weight(rng, &between, settings);
+        //TODO: enable/disable genes
     }
 
     fn mutate_add_connection<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, innovation_context: &mut InnovationContext, settings: &Settings) {
@@ -270,7 +365,7 @@ impl Genome {
     }
 }
 
-pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: f64, genome_2: &Genome, fitness_2: f64) -> Genome {
+pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: usize, genome_2: &Genome, fitness_2: usize) -> Genome {
     let between = Uniform::from(0.0..1.0);
     let mut choose_gene = |pair: AllignedTuplePair<GeneKey, GeneValue>| {
         let r = between.sample(rng);
@@ -306,8 +401,6 @@ pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: f64, ge
         }
     };
 
-    
-
     let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
     let new_genome_data = allign_indexmap_map(&genome_1.data, &genome_2.data, &get_id, &mut choose_gene);
     let new_next_node_id = NodeIndex(std::cmp::max(genome_1.next_node_id.0, genome_2.next_node_id.0));
@@ -328,6 +421,18 @@ mod tests {
             Gene::create(3, 4, 0.0, 4, true),
         ], 2, 2)
     } 
+
+    fn genome_sample_recurrent_1() -> Genome{
+        Genome::create(vec![
+            Gene::create(3, 2, 0.9, 0, true),
+            Gene::create(1, 4, -0.8, 1, true),
+            Gene::create(4, 3, 0.1, 2, true),
+            Gene::create(5, 2, -0.4, 3, true),
+            Gene::create(0, 4, -0.8, 4, true),
+            Gene::create(3, 5, 0.5, 5, true),
+            Gene::create(5, 4, -0.1, 6, true),
+        ], 2, 1)
+    }
     
     #[test]
     fn test_genome_max_node_id() {
@@ -357,5 +462,22 @@ mod tests {
         let mut innovation_context = InnovationContext::init(2, 2);
         genome.add_node(&mut innovation_context, GeneIndex(0));
         assert_eq!(genome.len(), 7);
+    }
+
+    #[test]
+    fn test_tarjan_scc() {
+        let genome = genome_sample_1();
+        let sccs = genome.tarjan_scc_();
+        assert_eq!(sccs.len(), 5);
+
+        let genome = genome_sample_recurrent_1();
+        let sccs = genome.tarjan_scc_();
+        for scc in sccs {
+            println!("scc size: {:?}", scc.len());
+            for node_index in scc.iter() {
+                println!("{:?}", node_index.0);
+            }
+        }
+        // assert_eq!(sccs.len(), 5);
     }
 }

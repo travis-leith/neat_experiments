@@ -2,7 +2,7 @@ use std::ops::Index;
 use std::ops::IndexMut;
 use super::genome::GeneIndex;
 
-#[derive(PartialEq, Default, Clone)]
+#[derive(PartialEq, Default, Clone, Debug)]
 pub enum NodeType{
     Sensor,
     #[default]

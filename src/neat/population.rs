@@ -1,8 +1,5 @@
-use super::{common::Settings, genome, innovation::InnovationContext, organism::{Organism, Organisms}, genome::Genome};
+use super::{common::Settings, genome::{self, Genome}, innovation::InnovationContext, organism::{Organism, OrganismIndex, Organisms}};
 use rand::{RngCore, Rng};
-
-#[derive(Clone, Copy)]
-pub struct OrganismIndex(pub usize);
 
 pub struct Species {
     pub members: Vec<OrganismIndex>,
@@ -20,7 +17,7 @@ pub struct Population {
 }
 
 pub trait Evaluator {
-    fn evaluate_single_organism(&self, organism: &mut Organism); //TODO make this more structured by modelling inputs and outputs
+    fn evaluate_single_organism(&mut self, organism: &mut Organism) -> usize; //TODO make this more structured by modelling inputs and outputs - user should not be able to mutate internal state directly
 }
 
 impl Population {
@@ -32,7 +29,7 @@ impl Population {
         let organism = &self.organisms[organism_index];
 
         let species_index =
-            self.species.iter().position(|species| organism.network.genome.distance(&species.representative, settings.excess_coefficient, settings.disjoint_coefficient, settings.weight_coefficient) < self.species_distance_threshold);
+            self.species.iter().position(|species| organism.genome.distance(&species.representative, settings.excess_coefficient, settings.disjoint_coefficient, settings.weight_coefficient) < self.species_distance_threshold);
 
         match species_index {
             Some(index) => {
@@ -41,7 +38,7 @@ impl Population {
             None => {
                 let new_species = Species {
                     members: vec![organism_index],
-                    representative: organism.network.genome.clone(),
+                    representative: organism.genome.clone(),
                     champion: organism_index,
                     avg_fitness: 0.0
                 };
@@ -97,15 +94,15 @@ impl Population {
         res
     }
 
-    pub fn evaluate<E: Evaluator>(&mut self, evaluator: &E) {
+    pub fn evaluate<E: Evaluator>(&mut self, evaluator: &mut E) {
         for s in self.species.iter_mut() {
-            let mut total_species_fitness = 0.0;
+            let mut total_species_fitness = 0;
             let mut champion = OrganismIndex(0);
-            let mut champion_fitness = 0.0;
+            let mut champion_fitness = 0;
 
             for &org_index in &s.members {
                 let org = &mut self.organisms[org_index];
-                evaluator.evaluate_single_organism(org);
+                org.fitness = evaluator.evaluate_single_organism(org);
                 total_species_fitness += org.fitness;
                 if org.fitness > champion_fitness {
                     champion_fitness = org.fitness;
@@ -114,7 +111,8 @@ impl Population {
             }
 
             s.champion = champion;
-            s.avg_fitness = total_species_fitness / (s.members.len() as f64);
+            // s.representative = self.organisms[champion].network.genome.clone();
+            s.avg_fitness = (total_species_fitness as f64) / (s.members.len() as f64);
         }
     }
 
@@ -131,14 +129,14 @@ impl Population {
                 let parent_2_index = s.members[rng.gen_range(0..s.members.len())];
                 let parent_1 = &self.organisms[parent_1_index];
                 let parent_2 = &self.organisms[parent_2_index];
-                let mut child_genome = genome::cross_over(rng, &parent_1.network.genome, parent_1.fitness, &parent_2.network.genome, parent_2.fitness);
+                let mut child_genome = genome::cross_over(rng, &parent_1.genome, parent_1.fitness, &parent_2.genome, parent_2.fitness);
                 child_genome.mutate(rng, &mut self.innovation_context, settings);
                 let child = Organism::create_from_genome(child_genome);
                 new_population.push(child);
             }
 
             if n_offspring > 0 {
-                let champion = self.organisms[s.champion].clone();
+                let champion = Organism::create_from_genome(self.organisms[s.champion].genome.clone());
                 new_population.push(champion);
             }
         }

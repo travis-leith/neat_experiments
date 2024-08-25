@@ -22,16 +22,16 @@ impl Settings {
         Settings {
             excess_coefficient: 1.0,
             disjoint_coefficient: 1.0,
-            weight_coefficient: 0.4,
+            weight_coefficient: 1.0,
             n_organisms: 100,
             n_sensor_nodes: 3,
             n_output_nodes: 1,
-            mutate_weight_rate: 0.2,
-            mutate_add_connection_rate: 0.2,
-            mutate_add_node_rate: 0.2,
+            mutate_weight_rate: 0.1,
+            mutate_add_connection_rate: 0.03,
+            mutate_add_node_rate: 0.01,
             mutate_weight_scale: 0.1,
-            n_species_min: 5,
-            n_species_max: 10
+            n_species_min: 20,
+            n_species_max: 40
         }
     }
 }
