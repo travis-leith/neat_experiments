@@ -2,27 +2,26 @@ extern crate neat_experiments;
 
 #[cfg(test)]
 mod test {
-    use neat_experiments::neat::{common::Settings, organism::{self, Organism}, population::Evaluator};
+    use neat_experiments::neat::{common::Settings, organism::Organism, population::Evaluator};
     use rand::{Rng, SeedableRng};
-    use rand::seq::SliceRandom;
+    // use rand::seq::SliceRandom;
     use rand_xoshiro::Xoshiro256PlusPlus;
     use neat_experiments::neat::population::Population;
 
     //create xor evaluator
-    struct XorEvaluator{
-        rng: Xoshiro256PlusPlus,
-    }
+    struct XorEvaluator;
 
     impl Evaluator for XorEvaluator {
         fn evaluate_single_organism(&mut self, organism: &mut Organism) -> usize {
-            let mut inputs = vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 1.0], vec![1.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]];
-            //shuffle inputs
-            inputs.shuffle(&mut self.rng);
+            let inputs = vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 1.0], vec![1.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]];
+            //random order
+            let indices = vec![0, 1, 2, 3];
+            // indices.shuffle(&mut self.rng);
 
             let expected_outputs = vec![0.0, 1.0, 1.0, 0.0];
             let mut acc = 0.0;
-            for i in 0..inputs.len() {
-                // organism.clear_values();
+            for i in indices {
+                organism.clear_values();
                 let output = organism.activate(&inputs[i]);
                 acc += (output[0] - expected_outputs[i]).powi(2);
             }
@@ -81,8 +80,7 @@ mod test {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(random_seed);
         let mut population = Population::init(&mut rng, &settings);
 
-        let evluator_rng = Xoshiro256PlusPlus::seed_from_u64(rng.gen());
-        let mut evlauator = XorEvaluator{rng: evluator_rng};
+        let mut evlauator = XorEvaluator;
 
         describe_population_demographics(&population);
         population.evaluate(&mut evlauator);        
@@ -102,16 +100,12 @@ mod test {
                     }
                 }
                 println!("activation order");
-                for scc in solution_org.activation_order.iter() {
-                    println!("scc size: {:?}", scc.len());
-                    for node_index in scc.iter() {
-                        let node = &solution_org.phenome[*node_index];
-                        println!("{:?} {:?}", node_index.0, node.node_type);
-                        node.inputs.iter().for_each(|gene_index| {
-                            let (gene_key, gene_value) = solution_org.genome.get_index(*gene_index);
-                            println!("{:?} --({:.4})--> {:?} [{:?}]", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0, gene_value.enabled);
-                        });
-                    }
+                for &node_index in &solution_org.activation_order {
+                    let node = &solution_org.phenome[node_index];
+                    node.inputs.iter().for_each(|gene_index| {
+                        let (gene_key, gene_value) = solution_org.genome.get_index(*gene_index);
+                        println!("{:?}---|{:.4}|{:?}", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0);
+                    });
                 }
 
                 let mut cloned_org = Organism::create_from_genome(solution_org.genome.clone());

@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use petgraph::visit::Walker;
 use rand::{RngCore, Rng};
 use rand_distr::{Distribution, Normal, Uniform};
 use indexmap::IndexMap;
@@ -115,105 +116,30 @@ impl Genome {
         self.data.get_index_mut(index.0).unwrap()
     }
 
-    pub fn tarjan_scc_(&self) -> Vec<Vec<NodeIndex>> {
+    pub fn rev_dfs_order_petgraph(&self) -> Vec<NodeIndex> {
         use petgraph::graph::DiGraph;
+        let new_node_id = self.next_node_id.0;
+        let start_edges = 
+            (0..self.n_sensor_nodes).map(|i| (new_node_id, i));
+
         let edges = 
-            self.data.iter().filter(|(_, gene)| gene.enabled).map(|(gene_key, _)| (gene_key.in_node_id.0, gene_key.out_node_id.0)).collect_vec();
-        let graph: petgraph::graph::DiGraph<(), (), usize> = DiGraph::from_edges(edges);
+            self.data.iter()
+            .filter(|(_, gene)| gene.enabled)
+            .map(|(gene_key, _)| (gene_key.in_node_id.0, gene_key.out_node_id.0));
 
+        let all_edges = edges.chain(start_edges);
+        
+        let graph: petgraph::graph::DiGraph<(), (), usize> = DiGraph::from_edges(all_edges);
 
-        let scc_order = petgraph::algo::tarjan_scc(&graph);
-        let mut res: Vec<Vec<NodeIndex>> =
-            scc_order.iter().rev().map(|scc| {
-                scc.iter().map(|node_index| {
-                    NodeIndex(node_index.index())
-                }).collect()
-            }).collect();
-        res.retain(|scc| scc.len() > 0);
-        res
-    }
+        let dfs = petgraph::visit::DfsPostOrder::new(&graph, new_node_id.into());
 
-    pub fn tarjan_scc(&self) -> Vec<Vec<NodeIndex>> {
-        // Define necessary structures and types
-        use rustc_hash::FxHashMap;
-
-        // Initialize variables
-        let mut index = 0;
-        let mut stack = Vec::new();
-        let mut indices = FxHashMap::default();
-        let mut low_links = FxHashMap::default();
-        let mut on_stack = FxHashMap::default();
-        let mut sccs = Vec::new();
-
-        // Define the recursive function `strong_connect`
-        fn strong_connect(
-            node: NodeIndex,
-            index: &mut usize,
-            stack: &mut Vec<NodeIndex>,
-            indices: &mut FxHashMap<NodeIndex, usize>,
-            low_links: &mut FxHashMap<NodeIndex, usize>,
-            on_stack: &mut FxHashMap<NodeIndex, bool>,
-            sccs: &mut Vec<Vec<NodeIndex>>,
-            graph: &FxHashMap<NodeIndex, Vec<NodeIndex>>,
-        ) {
-            // Set the depth index for `node` to the smallest unused index
-            indices.insert(node, *index);
-            low_links.insert(node, *index);
-            *index += 1;
-            stack.push(node);
-            on_stack.insert(node, true);
-
-            // Consider successors of `node`
-            if let Some(successors) = graph.get(&node) {
-                for &successor in successors {
-                    if !indices.contains_key(&successor) {
-                        // Successor has not yet been visited; recurse on it
-                        strong_connect(successor, index, stack, indices, low_links, on_stack, sccs, graph);
-                        let low_link_node = low_links.get(&node).unwrap().clone();
-                        let low_link_successor = low_links.get(&successor).unwrap().clone();
-                        low_links.insert(node, low_link_node.min(low_link_successor));
-                    } else if *on_stack.get(&successor).unwrap() {
-                        // Successor is in stack and hence in the current SCC
-                        let low_link_node = low_links.get(&node).unwrap().clone();
-                        let index_successor = indices.get(&successor).unwrap().clone();
-                        low_links.insert(node, low_link_node.min(index_successor));
-                    }
-                }
-            }
-
-            // If `node` is a root node, pop the stack and generate an SCC
-            if indices.get(&node) == low_links.get(&node) {
-                let mut scc = Vec::new();
-                loop {
-                    let w = stack.pop().unwrap();
-                    on_stack.insert(w, false);
-                    scc.push(w);
-                    if w == node {
-                        break;
-                    }
-                }
-                sccs.push(scc);
-            }
-        }
-
-        // Build the graph from the gene data
-        let mut graph: FxHashMap<NodeIndex, Vec<NodeIndex>> = FxHashMap::default();
-        for (gene_key, gene) in self.data.iter() {
-            if gene.enabled {
-                graph.entry(gene_key.in_node_id).or_default().push(gene_key.out_node_id);
-            }
-        }
-
-        // Iterate over all nodes and call `strong_connect` if the node is not yet visited
-        for &node in graph.keys() {
-            if !indices.contains_key(&node) {
-                strong_connect(node, &mut index, &mut stack, &mut indices, &mut low_links, &mut on_stack, &mut sccs, &graph);
-            }
-        }
-
-        // Return the list of SCCs
-        sccs.reverse();
-        sccs
+        dfs.iter(&graph)
+        .map(|node| NodeIndex(node.index()))
+        .take_while(|node| node.0 != new_node_id)
+        .collect_vec()
+        .into_iter()
+        .rev()
+        .collect()
     }
 
     pub fn add_connection(&mut self, innovation_context: &mut InnovationContext, in_node_id: NodeIndex, out_node_id: NodeIndex, weight: f64) {
@@ -411,6 +337,10 @@ pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: usize, 
 
 #[cfg(test)]
 mod tests {
+    // use fxhash::FxHashSet;
+    // use rand::SeedableRng;
+    // use rand_xoshiro::Xoshiro256PlusPlus;
+
     use super::*;
     fn genome_sample_1() -> Genome{
         Genome::create(vec![
@@ -464,20 +394,57 @@ mod tests {
         assert_eq!(genome.len(), 7);
     }
 
-    #[test]
-    fn test_tarjan_scc() {
-        let genome = genome_sample_1();
-        let sccs = genome.tarjan_scc_();
-        assert_eq!(sccs.len(), 5);
+    // fn generate_random_genes(n: usize, m: usize, random_seed: u64) -> Vec<Gene> {
+    //     let mut rng = Xoshiro256PlusPlus::seed_from_u64(random_seed);
+    //     let mut seen = FxHashSet::default();
+    //     let mut iters = 0;
+    //     let max_iterations = n * n;
 
+    //     while seen.len() < n && iters < max_iterations {
+    //         let input = rng.gen_range(0..m);
+    //         let output = rng.gen_range(0..m);
+    //         let pair = (input, output);
+    //         let reverse_pair = (output, input);
+    
+    //         if !seen.contains(&pair) && !seen.contains(&reverse_pair) && input != output {
+    //             seen.insert(pair);
+    //         }
+    //         iters += 1;
+    //     }
+    
+    //     seen.iter().enumerate().map(|(i, gene)| {
+    //         let weight = rng.gen_range(-1.0..1.0);
+    //         let innovation = i;
+    //         let enabled = true;
+    //         Gene::create(gene.0, gene.1, weight, innovation, enabled)
+    //     }).collect()
+    // }
+
+    // extern crate test;
+    // #[bench]
+    // fn bench_tarjan_scc(b: &mut test::Bencher) {
+    //     let genes = generate_random_genes(1000, 30, 123);
+    //     let genome = Genome::create(genes, 10, 10);
+    //     b.iter(|| {
+    //         genome.tarjan_scc();
+    //     });
+    // }
+
+    #[test]
+    fn test_dfs_order2(){
         let genome = genome_sample_recurrent_1();
-        let sccs = genome.tarjan_scc_();
-        for scc in sccs {
-            println!("scc size: {:?}", scc.len());
-            for node_index in scc.iter() {
-                println!("{:?}", node_index.0);
-            }
+
+        for (gene_key, gene_value) in genome.data.iter() {
+            println!("{:?}---|{:.4}|{:?}", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0);
         }
-        // assert_eq!(sccs.len(), 5);
+
+        println!("rev dfs order");
+        let dfs_order = genome.rev_dfs_order_petgraph();
+
+        for node_index in dfs_order {
+            println!("{:?}", node_index.0);
+        }
+
     }
+
 }

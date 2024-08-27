@@ -16,7 +16,7 @@ pub struct OrganismIndex(pub usize);
 pub struct Organism {
     pub phenome: Phenome,
     pub genome: Genome,
-    pub activation_order: Vec<Vec<NodeIndex>>,
+    pub activation_order: Vec<NodeIndex>,
     pub fitness: usize
 }
 
@@ -25,6 +25,7 @@ impl Organism {
 
     pub fn create_from_genome(genome: Genome) -> Organism {
         //TODO remove connections involving dead end nodes
+        //TODO create phenome::create_from_genome
         let mut phenome = Phenome::create_disconnected(genome.n_sensor_nodes, genome.n_output_nodes, genome.next_node_id.0);
 
         for (i, (gene_key, gene_val)) in genome.iter().enumerate() {
@@ -33,7 +34,7 @@ impl Organism {
             }
         }
 
-        let activation_order = genome.tarjan_scc();
+        let activation_order = genome.rev_dfs_order_petgraph();
         
         Organism {
             phenome,
@@ -64,22 +65,20 @@ impl Organism {
             self.phenome[NodeIndex(i)].value = input;
         }
 
-        for scc in self.activation_order.iter() {
-            for node_index in scc.iter() {
-                let node = &self.phenome[*node_index];
-                if node.node_type == NodeType::Sensor {
-                    continue;
-                }
-                let active_sum = node.inputs.iter().fold(0., |acc, gene_index| {
-                    let (gene_key, gene_value) = &self.genome.get_index(*gene_index);
-                    if gene_value.enabled {
-                        acc + gene_value.weight * self.phenome[gene_key.in_node_id].value
-                    } else {
-                        acc
-                    }
-                });
-                self.phenome[*node_index].value = sigmoid(active_sum);
+        for &node_index in &self.activation_order {
+            let node = &self.phenome[node_index];
+            if node.node_type == NodeType::Sensor {
+                continue;
             }
+            let active_sum = node.inputs.iter().fold(0., |acc, gene_index| {
+                let (gene_key, gene_value) = &self.genome.get_index(*gene_index);
+                if gene_value.enabled {
+                    acc + gene_value.weight * self.phenome[gene_key.in_node_id].value
+                } else {
+                    acc
+                }
+            });
+            self.phenome[node_index].value = sigmoid(active_sum);
         }
 
         let outputs = self.phenome.iter().skip(self.genome.n_sensor_nodes).take(self.genome.n_output_nodes).map(|node| node.value).collect();

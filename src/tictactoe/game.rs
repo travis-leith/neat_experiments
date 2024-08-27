@@ -54,7 +54,6 @@ pub enum GameOverState {
 
 pub enum GameState {
     Playing(PlayingGameState),
-    // BadMove(PlayingGameState),
     GameOver(GameBoard, GameOverState)
 }
 
@@ -97,13 +96,6 @@ fn win_line(gameboard: &GameBoard, m1: CellLocation, m2: CellLocation, m3: CellL
 }
 
 fn game_winner(gameboard: &GameBoard) -> Option<Player>{
-    // let win_line = |m1: CellLocation, m2: CellLocation, m3: CellLocation| {
-    //     match (gameboard.get_cell(m1), gameboard.get_cell(m2), gameboard.get_cell(m3)) {
-    //         (Cell(Some(p1)), Cell(Some(p2)), Cell(Some(p3))) if p1 == p2 && p1 == p3 => Some(p1),
-    //         _ => None
-    //     }
-    // };
-    
     //horizontal win lines
     win_line(gameboard, CellLocation::TopLft, CellLocation::TopMid, CellLocation::TopRgt)
     .or_else(|| win_line(gameboard, CellLocation::MidLft, CellLocation::MidMid, CellLocation::MidRgt))
@@ -152,15 +144,6 @@ fn play_one_move(ctrl: &mut impl Controller, mut playing_state: PlayingGameState
         Ok(GameState::GameOver(playing_state.gameboard, GameOverState::Disqualified(playing_state.player_turn, player_move)))
     }
 }
-
-// #[tailcall]
-// pub fn play_game(ctrl: &mut impl Controller, playing_state: PlayingGameState) -> Result<(GameBoard, GameOverState), PlayingGameState> {
-//     match play_one_move(ctrl, playing_state) {
-//         Ok(GameState::Playing(new_playing_state)) => play_game(ctrl, new_playing_state),
-//         Ok(GameState::GameOver(gameboard, game_over_state)) => Ok((gameboard, game_over_state)),
-//         Err(new_playing_state) => Err(new_playing_state)
-//     }
-// }
 
 //play_game takes a playing_state so that games can be resumable mid play
 pub fn play_game(ctrl: &mut impl Controller, mut playing_state: PlayingGameState) -> Result<(GameBoard, GameOverState), PlayingGameState> {
