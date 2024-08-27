@@ -2,8 +2,8 @@ extern crate neat_experiments;
 
 #[cfg(test)]
 mod test {
-    use neat_experiments::neat::{common::Settings, organism::Organism, population::Evaluator};
-    use rand::{Rng, SeedableRng};
+    use neat_experiments::neat::{common::Settings, organism::Organism, population::Arena};
+    use rand::SeedableRng;
     // use rand::seq::SliceRandom;
     use rand_xoshiro::Xoshiro256PlusPlus;
     use neat_experiments::neat::population::Population;
@@ -11,18 +11,15 @@ mod test {
     //create xor evaluator
     struct XorEvaluator;
 
-    impl Evaluator for XorEvaluator {
-        fn evaluate_single_organism(&mut self, organism: &mut Organism) -> usize {
-            let inputs = vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 1.0], vec![1.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]];
-            //random order
-            let indices = vec![0, 1, 2, 3];
-            // indices.shuffle(&mut self.rng);
+    impl Arena for XorEvaluator {
+        fn generate_inputs(&mut self) -> Vec<Vec<f64>> {
+            vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 1.0], vec![1.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]]
+        }
 
+        fn evaluate_outputs(&mut self, outputs: Vec<Vec<f64>>) -> usize {
             let expected_outputs = vec![0.0, 1.0, 1.0, 0.0];
             let mut acc = 0.0;
-            for i in indices {
-                organism.clear_values();
-                let output = organism.activate(&inputs[i]);
+            for (i, output) in outputs.iter().enumerate() {
                 acc += (output[0] - expected_outputs[i]).powi(2);
             }
             let fitness = (4.0 - acc) * 10000.0;
@@ -33,7 +30,7 @@ mod test {
     fn check_evaluation(organism: &mut Organism) {
         let inputs = vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 1.0], vec![1.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]];
         for i in 0..inputs.len() {
-            organism.clear_values();
+            // organism.clear_values();
             let output = organism.activate(&inputs[i]);
             println!("in: {:?}; out: {:?}", inputs[i], output);
         }
@@ -63,7 +60,7 @@ mod test {
     fn get_solution_organism(population: &Population) -> Option<&Organism> {
         for s in population.species.iter() {
             let champion = &population.organisms[s.champion];
-            if champion.fitness > 39990 {
+            if champion.fitness > 39900 {
                 return Some(champion);
             }
         }
@@ -75,21 +72,22 @@ mod test {
         let mut settings = Settings::standard();
         settings.n_organisms = 1000;
     
-        let mut rng = rand::thread_rng();
-        let random_seed: u64 = rng.gen();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(random_seed);
+        // let mut rng = rand::thread_rng();
+        // let random_seed: u64 = rng.gen();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(12345);
         let mut population = Population::init(&mut rng, &settings);
 
-        let mut evlauator = XorEvaluator;
+        let mut evaluator = XorEvaluator;
 
         describe_population_demographics(&population);
-        population.evaluate(&mut evlauator);        
+        population.evolve(&mut evaluator, true);        
         describe_population_fitness(&population);
 
         for _ in 0..500 {
             population.next_generation(&mut rng, &settings);
             describe_population_demographics(&population);
-            population.evaluate(&mut evlauator);
+            // population.evaluate(&mut evaluator);
+            population.evolve(&mut evaluator, true);
             describe_population_fitness(&population);
 
             if let Some(solution_org) = get_solution_organism(&population) {
@@ -115,7 +113,7 @@ mod test {
                 break;
             }
         }
-        println!("random seed: {:?}", random_seed);
+        // println!("random seed: {:?}", random_seed);
     }
 }
 

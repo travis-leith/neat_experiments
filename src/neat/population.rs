@@ -16,8 +16,9 @@ pub struct Population {
     innovation_context: InnovationContext
 }
 
-pub trait Evaluator {
-    fn evaluate_single_organism(&mut self, organism: &mut Organism) -> usize; //TODO make this more structured by modelling inputs and outputs - user should not be able to mutate internal state directly
+pub trait Arena {
+    fn generate_inputs(&mut self) -> Vec<Vec<f64>>;
+    fn evaluate_outputs(&mut self, outputs: Vec<Vec<f64>>) -> usize;
 }
 
 impl Population {
@@ -94,7 +95,7 @@ impl Population {
         res
     }
 
-    pub fn evaluate<E: Evaluator>(&mut self, evaluator: &mut E) {
+    pub fn evolve<E: Arena>(&mut self, evaluator: &mut E, clear_state: bool) {
         for s in self.species.iter_mut() {
             let mut total_species_fitness = 0;
             let mut champion = OrganismIndex(0);
@@ -102,7 +103,14 @@ impl Population {
 
             for &org_index in &s.members {
                 let org = &mut self.organisms[org_index];
-                org.fitness = evaluator.evaluate_single_organism(org);
+                let inputs = evaluator.generate_inputs();
+                let outputs = inputs.iter().map(|input| {
+                    if clear_state {
+                        org.clear_values();
+                    }
+                    org.activate(input)
+                }).collect();
+                org.fitness = evaluator.evaluate_outputs(outputs);
                 total_species_fitness += org.fitness;
                 if org.fitness > champion_fitness {
                     champion_fitness = org.fitness;
@@ -111,7 +119,6 @@ impl Population {
             }
 
             s.champion = champion;
-            // s.representative = self.organisms[champion].network.genome.clone();
             s.avg_fitness = (total_species_fitness as f64) / (s.members.len() as f64);
         }
     }

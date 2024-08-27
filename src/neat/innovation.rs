@@ -1,5 +1,5 @@
 
-use rustc_hash::{FxHashMap};
+use rustc_hash::FxHashMap;
 use super::{genome::GeneKey, phenome::NodeIndex};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
