@@ -117,6 +117,7 @@ impl Genome {
     }
 
     pub fn rev_dfs_order_petgraph(&self) -> Vec<NodeIndex> {
+        //TODO implement a version of this that ignores dead end nodes
         use petgraph::graph::DiGraph;
         let new_node_id = self.next_node_id.0;
         let start_edges = 

@@ -93,6 +93,7 @@ impl Organism {
 }
 
 pub struct Organisms(Vec<Organism>);
+use rayon::prelude::*;
 
 impl Organisms {
     pub fn push(&mut self, organism: Organism) {
@@ -125,6 +126,14 @@ impl IndexMut<OrganismIndex> for Organisms {
     }
 }
 
+impl<'a> IntoParallelRefMutIterator<'a> for Organisms {
+    type Item = &'a mut Organism;
+    type Iter = rayon::slice::IterMut<'a, Organism>;
+
+    fn par_iter_mut(&'a mut self) -> Self::Iter {
+        self.0.par_iter_mut()
+    }
+}
 
 #[cfg(test)]
 mod tests {

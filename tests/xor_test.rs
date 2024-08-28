@@ -12,11 +12,11 @@ mod test {
     struct XorEvaluator;
 
     impl Arena for XorEvaluator {
-        fn generate_inputs(&mut self) -> Vec<Vec<f64>> {
+        fn generate_inputs(&self) -> Vec<Vec<f64>> {
             vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 1.0], vec![1.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]]
         }
 
-        fn evaluate_outputs(&mut self, outputs: Vec<Vec<f64>>) -> usize {
+        fn evaluate_outputs(&self, outputs: Vec<Vec<f64>>) -> usize {
             let expected_outputs = vec![0.0, 1.0, 1.0, 0.0];
             let mut acc = 0.0;
             for (i, output) in outputs.iter().enumerate() {
@@ -72,22 +72,20 @@ mod test {
         let mut settings = Settings::standard();
         settings.n_organisms = 1000;
     
-        // let mut rng = rand::thread_rng();
-        // let random_seed: u64 = rng.gen();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(12345);
         let mut population = Population::init(&mut rng, &settings);
 
         let mut evaluator = XorEvaluator;
 
         describe_population_demographics(&population);
-        population.evolve(&mut evaluator, true);        
+        population.evaluate(&mut evaluator, true);        
         describe_population_fitness(&population);
 
         for _ in 0..500 {
             population.next_generation(&mut rng, &settings);
             describe_population_demographics(&population);
             // population.evaluate(&mut evaluator);
-            population.evolve(&mut evaluator, true);
+            population.evaluate_par(&mut evaluator, true);
             describe_population_fitness(&population);
 
             if let Some(solution_org) = get_solution_organism(&population) {

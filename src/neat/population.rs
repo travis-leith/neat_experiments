@@ -1,5 +1,7 @@
 use super::{common::Settings, genome::{self, Genome}, innovation::InnovationContext, organism::{Organism, OrganismIndex, Organisms}};
-use rand::{RngCore, Rng};
+use itertools::Itertools;
+use rand::{Rng, RngCore, SeedableRng};
+use rand_xoshiro::Xoshiro256PlusPlus;
 
 pub struct Species {
     pub members: Vec<OrganismIndex>,
@@ -17,8 +19,8 @@ pub struct Population {
 }
 
 pub trait Arena {
-    fn generate_inputs(&mut self) -> Vec<Vec<f64>>;
-    fn evaluate_outputs(&mut self, outputs: Vec<Vec<f64>>) -> usize;
+    fn generate_inputs(&self) -> Vec<Vec<f64>>;
+    fn evaluate_outputs(&self, outputs: Vec<Vec<f64>>) -> usize;
 }
 
 impl Population {
@@ -95,7 +97,7 @@ impl Population {
         res
     }
 
-    pub fn evolve<E: Arena>(&mut self, evaluator: &mut E, clear_state: bool) {
+    pub fn evaluate<E: Arena>(&mut self, evaluator: &mut E, clear_state: bool) {
         for s in self.species.iter_mut() {
             let mut total_species_fitness = 0;
             let mut champion = OrganismIndex(0);
@@ -123,6 +125,37 @@ impl Population {
         }
     }
 
+    pub fn evaluate_par<E: Arena + Send + Sync>(&mut self, evaluator: &E, clear_state: bool) {
+        use rayon::prelude::*;
+
+        self.organisms.par_iter_mut().for_each(|org|{
+            let inputs = evaluator.generate_inputs();
+            let outputs = inputs.iter().map(|input| {
+                if clear_state {
+                    org.clear_values();
+                }
+                org.activate(input)
+            }).collect();
+            org.fitness = evaluator.evaluate_outputs(outputs);
+        });
+
+        for s in self.species.iter_mut() {
+            let mut total_species_fitness = 0;
+            let mut champion = OrganismIndex(0);
+            let mut champion_fitness = 0;
+            for &org_index in &s.members {
+                let org = &self.organisms[org_index];
+                total_species_fitness += org.fitness;
+                if org.fitness > champion_fitness {
+                    champion_fitness = org.fitness;
+                    champion = org_index;
+                }
+            }
+
+            s.champion = champion;
+            s.avg_fitness = (total_species_fitness as f64) / (s.members.len() as f64);
+        }
+    }
     pub fn next_generation<R: RngCore>(&mut self, rng: &mut R, settings: &Settings) {
         self.generation += 1;
         let mut new_population = Vec::new();
@@ -151,6 +184,7 @@ impl Population {
         self.organisms = Organisms::new(new_population);
         self.speciate(settings)
     }
+
 }
 
 #[cfg(test)]
