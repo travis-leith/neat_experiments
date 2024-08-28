@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 
-use rand::RngCore;
+use rand::{seq::SliceRandom, RngCore};
 
 use crate::neat::{genome::Genome, phenome::NodeType};
 
@@ -110,6 +110,14 @@ impl Organisms {
 
     pub fn iter(&self) -> std::slice::Iter<Organism> {
         self.0.iter()
+    }
+
+    pub fn par_chunks_mut(&mut self, chunk_size: usize) -> rayon::slice::ChunksMut<Organism> {
+        self.0.par_chunks_mut(chunk_size)
+    }
+
+    pub fn shuffle<R: RngCore>(&mut self, rng: &mut R) {
+        self.0.shuffle(rng);
     }
 }
 

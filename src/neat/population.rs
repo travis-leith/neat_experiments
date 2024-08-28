@@ -1,7 +1,5 @@
 use super::{common::Settings, genome::{self, Genome}, innovation::InnovationContext, organism::{Organism, OrganismIndex, Organisms}};
-use itertools::Itertools;
-use rand::{Rng, RngCore, SeedableRng};
-use rand_xoshiro::Xoshiro256PlusPlus;
+use rand::{Rng, RngCore};
 
 pub struct Species {
     pub members: Vec<OrganismIndex>,
@@ -18,9 +16,13 @@ pub struct Population {
     innovation_context: InnovationContext
 }
 
-pub trait Arena {
+pub trait SinglePlayerArena {
     fn generate_inputs(&self) -> Vec<Vec<f64>>;
     fn evaluate_outputs(&self, outputs: Vec<Vec<f64>>) -> usize;
+}
+
+pub trait TurnBasedArena {
+    fn evluate_organisms(&self, organisms: &Vec<&mut Organism>);
 }
 
 impl Population {
@@ -97,7 +99,7 @@ impl Population {
         res
     }
 
-    pub fn evaluate<E: Arena>(&mut self, evaluator: &mut E, clear_state: bool) {
+    pub fn evaluate<E: SinglePlayerArena>(&mut self, evaluator: &mut E, clear_state: bool) {
         for s in self.species.iter_mut() {
             let mut total_species_fitness = 0;
             let mut champion = OrganismIndex(0);
@@ -125,20 +127,7 @@ impl Population {
         }
     }
 
-    pub fn evaluate_par<E: Arena + Send + Sync>(&mut self, evaluator: &E, clear_state: bool) {
-        use rayon::prelude::*;
-
-        self.organisms.par_iter_mut().for_each(|org|{
-            let inputs = evaluator.generate_inputs();
-            let outputs = inputs.iter().map(|input| {
-                if clear_state {
-                    org.clear_values();
-                }
-                org.activate(input)
-            }).collect();
-            org.fitness = evaluator.evaluate_outputs(outputs);
-        });
-
+    fn set_champions(&mut self) {
         for s in self.species.iter_mut() {
             let mut total_species_fitness = 0;
             let mut champion = OrganismIndex(0);
@@ -156,6 +145,45 @@ impl Population {
             s.avg_fitness = (total_species_fitness as f64) / (s.members.len() as f64);
         }
     }
+    pub fn evaluate_single_player<A: SinglePlayerArena + Send + Sync>(&mut self, evaluator: &A, clear_state: bool) {
+        use rayon::prelude::*;
+
+        self.organisms.par_iter_mut().for_each(|org|{
+            let inputs = evaluator.generate_inputs();
+            let outputs = inputs.iter().map(|input| {
+                if clear_state {
+                    org.clear_values();
+                }
+                org.activate(input)
+            }).collect();
+            org.fitness = evaluator.evaluate_outputs(outputs);
+        });
+
+        self.set_champions();
+    }
+
+    pub fn evaluate_two_player<A: TurnBasedArena + Send + Sync, R: RngCore>(&mut self, rng: &mut R, evaluator: &A) {
+        use rayon::prelude::*;
+        self.organisms.shuffle(rng);
+        self.organisms.par_chunks_mut(50).for_each(|chunk| {
+            for i in 0 .. chunk.len() {
+                let (left, others) = chunk.split_at_mut(i);
+                let (middle, right) = others.split_at_mut(1);
+                let org1 = &mut middle[0];
+                //process left
+                for org2 in left {
+                    evaluator.evluate_organisms(&mut vec![org1, org2]);
+                }
+                //process right
+                for org2 in right {
+                    evaluator.evluate_organisms(&mut vec![org1, org2]);
+                }
+            }
+        });
+
+        self.set_champions();
+    }
+
     pub fn next_generation<R: RngCore>(&mut self, rng: &mut R, settings: &Settings) {
         self.generation += 1;
         let mut new_population = Vec::new();

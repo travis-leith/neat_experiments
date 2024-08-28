@@ -2,7 +2,7 @@ extern crate neat_experiments;
 
 #[cfg(test)]
 mod test {
-    use neat_experiments::neat::{common::Settings, organism::Organism, population::Arena};
+    use neat_experiments::neat::{common::Settings, organism::Organism, population::SinglePlayerArena};
     use rand::SeedableRng;
     // use rand::seq::SliceRandom;
     use rand_xoshiro::Xoshiro256PlusPlus;
@@ -11,7 +11,7 @@ mod test {
     //create xor evaluator
     struct XorEvaluator;
 
-    impl Arena for XorEvaluator {
+    impl SinglePlayerArena for XorEvaluator {
         fn generate_inputs(&self) -> Vec<Vec<f64>> {
             vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 1.0], vec![1.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]]
         }
@@ -85,7 +85,7 @@ mod test {
             population.next_generation(&mut rng, &settings);
             describe_population_demographics(&population);
             // population.evaluate(&mut evaluator);
-            population.evaluate_par(&mut evaluator, true);
+            population.evaluate_single_player(&mut evaluator, true);
             describe_population_fitness(&population);
 
             if let Some(solution_org) = get_solution_organism(&population) {
