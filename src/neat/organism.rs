@@ -23,7 +23,7 @@ pub struct Organism {
 impl Organism {
     
 
-    pub fn create_from_genome(genome: Genome) -> Organism {
+    pub fn create_from_genome(genome: Genome, initial_fitness: usize) -> Organism {
         //TODO remove connections involving dead end nodes
         //TODO create phenome::create_from_genome
         let mut phenome = Phenome::create_disconnected(genome.n_sensor_nodes, genome.n_output_nodes, genome.next_node_id.0);
@@ -40,26 +40,27 @@ impl Organism {
             phenome,
             genome,
             activation_order,
-            fitness: 0
+            fitness: initial_fitness
         }
     }
 
-    pub fn init<R: RngCore>(rng: &mut R, n_sensor_nodes: usize, n_output_nodes: usize) -> Organism {
+    pub fn init<R: RngCore>(rng: &mut R, n_sensor_nodes: usize, n_output_nodes: usize, initial_fitness: usize) -> Organism {
         let genome = Genome::init(rng, n_sensor_nodes, n_output_nodes);
-        Self::create_from_genome(genome)
+        Self::create_from_genome(genome, initial_fitness)
     }
     pub fn activate(&mut self, sensor_values: &Vec<f64>) -> Vec<f64> {
-        // fn relu(x: f64) -> f64 {
-        //     if x > 0.0 {
-        //         x
-        //     } else {
-        //         0.0
-        //     }
-        // }
-
-        fn sigmoid(x: f64) -> f64 {
-            1.0 / (1.0 + (-4.9 * x).exp())
+        debug_assert!(sensor_values.len() == self.genome.n_sensor_nodes);
+        fn relu(x: f64) -> f64 {
+            if x > 0.0 {
+                x
+            } else {
+                0.0
+            }
         }
+
+        // fn sigmoid(x: f64) -> f64 {
+        //     1.0 / (1.0 + (-4.9 * x).exp())
+        // }
 
         for (i, &input) in sensor_values.iter().enumerate() {
             self.phenome[NodeIndex(i)].value = input;
@@ -78,7 +79,7 @@ impl Organism {
                     acc
                 }
             });
-            self.phenome[node_index].value = sigmoid(active_sum);
+            self.phenome[node_index].value = relu(active_sum);
         }
 
         let outputs = self.phenome.iter().skip(self.genome.n_sensor_nodes).take(self.genome.n_output_nodes).map(|node| node.value).collect();
@@ -112,12 +113,20 @@ impl Organisms {
         self.0.iter()
     }
 
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<Organism> {
+        self.0.iter_mut()
+    }
+
     pub fn par_chunks_mut(&mut self, chunk_size: usize) -> rayon::slice::ChunksMut<Organism> {
         self.0.par_chunks_mut(chunk_size)
     }
 
     pub fn shuffle<R: RngCore>(&mut self, rng: &mut R) {
         self.0.shuffle(rng);
+    }
+
+    pub fn split_at_mut(&mut self, mid: usize) -> (&mut [Organism], &mut [Organism]) {
+        self.0.split_at_mut(mid)
     }
 }
 
@@ -173,7 +182,7 @@ mod tests {
 
     #[test]
     fn network_creation() {
-        let network =  Organism::create_from_genome(genome_sample_feed_forward_1());
+        let network =  Organism::create_from_genome(genome_sample_feed_forward_1(), 0);
         assert_eq!(network.phenome.len(), 6);
         assert_eq!(network.phenome[NodeIndex(2)].inputs.len(), 1);
         assert_eq!(network.phenome[NodeIndex(3)].inputs.len(), 2);
@@ -186,7 +195,7 @@ mod tests {
         let n_sensor_nodes = 9;
         let n_output_nodes = 10;
         let n_total = n_sensor_nodes + n_output_nodes;
-        let network = Organism::init(&mut rng, n_sensor_nodes, n_output_nodes);
+        let network = Organism::init(&mut rng, n_sensor_nodes, n_output_nodes, 0);
         assert_eq!(network.genome.get_index(GeneIndex(89)).1.innovation.0, 89);
         assert_eq!(network.genome.len(), 90);
         assert_eq!(network.phenome.len(), n_total);
@@ -203,7 +212,7 @@ mod tests {
     #[test]
     fn feed_forward() {
         let genome = genome_sample_feed_forward_1();
-        let mut network =  Organism::create_from_genome(genome);
+        let mut network =  Organism::create_from_genome(genome, 0);
 
         let output = network.activate(&vec![0.5, -0.2]);
         assert_approx_eq!(network.phenome[NodeIndex(2)].value, 0.184);
@@ -216,7 +225,7 @@ mod tests {
     #[test]
     fn recurrent() {
         let genome = genome_sample_recurrent_1();
-        let mut network =  Organism::create_from_genome(genome);
+        let mut network =  Organism::create_from_genome(genome, 0);
 
         let inputs = vec![-0.9, 0.6];
         let mut outputs = network.activate(&inputs);

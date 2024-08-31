@@ -11,6 +11,7 @@ pub struct Settings {
     pub mutate_weight_scale: f64,
     pub n_species_min: usize,
     pub n_species_max: usize,
+    pub initial_fitness: usize //TODO come up with a better abstract for this. Maybe a generic wrapper for an organism somehow
     //TODO add more settings
     //inter_species_mating_rate
     //intra_species_mating_rate
@@ -18,20 +19,21 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn standard() -> Settings {
+    pub fn standard(n_sensor_nodes: usize, n_output_nodes:usize ) -> Settings {
         Settings {
             excess_coefficient: 1.0,
             disjoint_coefficient: 1.0,
             weight_coefficient: 1.0,
             n_organisms: 100,
-            n_sensor_nodes: 3,
-            n_output_nodes: 1,
+            n_sensor_nodes,
+            n_output_nodes,
             mutate_weight_rate: 0.1,
+            mutate_weight_scale: 0.1,
             mutate_add_connection_rate: 0.03,
             mutate_add_node_rate: 0.01,
-            mutate_weight_scale: 0.1,
             n_species_min: 20,
-            n_species_max: 40
+            n_species_max: 40,
+            initial_fitness: 0
         }
     }
 }

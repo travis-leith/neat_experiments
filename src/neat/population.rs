@@ -1,4 +1,5 @@
 use super::{common::Settings, genome::{self, Genome}, innovation::InnovationContext, organism::{Organism, OrganismIndex, Organisms}};
+use itertools::Itertools;
 use rand::{Rng, RngCore};
 
 pub struct Species {
@@ -18,11 +19,12 @@ pub struct Population {
 
 pub trait SinglePlayerArena {
     fn generate_inputs(&self) -> Vec<Vec<f64>>;
-    fn evaluate_outputs(&self, outputs: Vec<Vec<f64>>) -> usize;
+    fn evaluate_organisms(&self, outputs: Vec<Vec<f64>>) -> usize;
 }
 
 pub trait TurnBasedArena {
-    fn evluate_organisms(&self, organisms: &Vec<&mut Organism>);
+    // fn evluate_organisms(&self, organisms: &mut Vec<&mut Organism>);
+    fn evaluate_organisms(&self, org1: &mut Organism, org2: &mut Organism);
 }
 
 impl Population {
@@ -52,8 +54,9 @@ impl Population {
         }
     }
 
-    fn speciate(&mut self, settings: &Settings) {
+    fn speciate<R: RngCore>(&mut self, rng: &mut R, settings: &Settings) {
         let max_loops = 10;
+        self.organisms.shuffle(rng);
         for _ in 0..max_loops {
             for s in self.species.iter_mut() {
                 s.members.clear();
@@ -83,7 +86,7 @@ impl Population {
         let mut organisms = Vec::new();
 
         for _ in 0..settings.n_organisms {
-            let organism = Organism::init(rng, settings.n_sensor_nodes, settings.n_output_nodes);
+            let organism = Organism::init(rng, settings.n_sensor_nodes, settings.n_output_nodes, settings.initial_fitness);
             organisms.push(organism);
         }
 
@@ -95,7 +98,7 @@ impl Population {
             innovation_context
         };
 
-        res.speciate(settings);
+        res.speciate(rng, settings);
         res
     }
 
@@ -114,7 +117,7 @@ impl Population {
                     }
                     org.activate(input)
                 }).collect();
-                org.fitness = evaluator.evaluate_outputs(outputs);
+                org.fitness = evaluator.evaluate_organisms(outputs);
                 total_species_fitness += org.fitness;
                 if org.fitness > champion_fitness {
                     champion_fitness = org.fitness;
@@ -156,30 +159,56 @@ impl Population {
                 }
                 org.activate(input)
             }).collect();
-            org.fitness = evaluator.evaluate_outputs(outputs);
+            org.fitness = evaluator.evaluate_organisms(outputs);
         });
 
         self.set_champions();
     }
 
-    pub fn evaluate_two_player<A: TurnBasedArena + Send + Sync, R: RngCore>(&mut self, rng: &mut R, evaluator: &A) {
+    pub fn evaluate_two_player<A: TurnBasedArena + Send + Sync>(&mut self, evaluator: &A) {
         use rayon::prelude::*;
-        self.organisms.shuffle(rng);
-        self.organisms.par_chunks_mut(50).for_each(|chunk| {
+        self.organisms.par_chunks_mut(100).for_each(|chunk| {
             for i in 0 .. chunk.len() {
                 let (left, others) = chunk.split_at_mut(i);
                 let (middle, right) = others.split_at_mut(1);
                 let org1 = &mut middle[0];
                 //process left
                 for org2 in left {
-                    evaluator.evluate_organisms(&mut vec![org1, org2]);
+                    evaluator.evaluate_organisms(org1, org2);
                 }
                 //process right
                 for org2 in right {
-                    evaluator.evluate_organisms(&mut vec![org1, org2]);
+                    evaluator.evaluate_organisms(org1, org2);
                 }
             }
         });
+
+        self.set_champions();
+    }
+
+    pub fn evaluate_all<A: TurnBasedArena + Send + Sync>(&mut self, evaluator: &A) {
+        use rayon::prelude::*;
+        use std::sync::Mutex;
+        
+        let mut organisms: Vec<_> = self.organisms.iter_mut().map(|org| Mutex::new(org)).collect();
+        for i in 0 .. organisms.len() {
+            let (left, others) = organisms.split_at_mut(i);
+            let (middle, right) = others.split_at_mut(1);
+            let org1 = &mut middle[0];
+            //process left
+            left.par_iter().for_each(|org2| {
+                let mut org1_lock = org1.lock().unwrap();
+                let mut org2_lock = org2.lock().unwrap();
+                evaluator.evaluate_organisms(&mut org1_lock, &mut org2_lock);
+            });
+            
+            //process right
+            right.par_iter().for_each(|org2| {
+                let mut org1_lock = org1.lock().unwrap();
+                let mut org2_lock = org2.lock().unwrap();
+                evaluator.evaluate_organisms(&mut org1_lock, &mut org2_lock);
+            });
+        }
 
         self.set_champions();
     }
@@ -190,27 +219,40 @@ impl Population {
         
         let total_avg_fitness: f64 = self.species.iter().map(|s| s.avg_fitness).sum(); //TODO: move inside loop
 
-        for s in self.species.iter() {
-            let n_offspring = (s.avg_fitness / total_avg_fitness * settings.n_organisms as f64).round() as usize;
+        let offspring_per_species = 
+            if total_avg_fitness > 0.0 {
+                self.species.iter()
+                .map(|s| (s.avg_fitness / total_avg_fitness * settings.n_organisms as f64).round() as usize)
+                .collect_vec()
+            } else {
+                let n = settings.n_organisms / self.species.len();
+                vec![n; self.species.len()]
+            };
+
+        for (i, s) in self.species.iter_mut().enumerate() {
+            let n_offspring = offspring_per_species[i];
+            s.members.sort_by_key(|&org_index| -(self.organisms[org_index].fitness as i64));
+            let n_members = s.members.len();
+            let n_breeders = (n_members as f64 * 0.4).ceil() as usize;
             for _ in 0..n_offspring {
-                let parent_1_index = s.members[rng.gen_range(0..s.members.len())];
-                let parent_2_index = s.members[rng.gen_range(0..s.members.len())];
+                let parent_1_index = s.members[rng.gen_range(0..n_breeders)];
+                let parent_2_index = s.members[rng.gen_range(0..n_breeders)];
                 let parent_1 = &self.organisms[parent_1_index];
                 let parent_2 = &self.organisms[parent_2_index];
                 let mut child_genome = genome::cross_over(rng, &parent_1.genome, parent_1.fitness, &parent_2.genome, parent_2.fitness);
                 child_genome.mutate(rng, &mut self.innovation_context, settings);
-                let child = Organism::create_from_genome(child_genome);
+                let child = Organism::create_from_genome(child_genome, settings.initial_fitness);
                 new_population.push(child);
             }
 
             if n_offspring > 0 {
-                let champion = Organism::create_from_genome(self.organisms[s.champion].genome.clone());
+                let champion = Organism::create_from_genome(self.organisms[s.champion].genome.clone(), settings.initial_fitness);
                 new_population.push(champion);
             }
         }
 
         self.organisms = Organisms::new(new_population);
-        self.speciate(settings)
+        self.speciate(rng, settings)
     }
 
 }
@@ -221,7 +263,7 @@ mod tests {
 
     #[test]
     fn test_init() {
-        let settings = Settings::standard();
+        let settings = Settings::standard(3, 1);
         let mut rng = rand::thread_rng();
         let population = Population::init(&mut rng, &settings);
         assert_eq!(population.innovation_context.innovation_map.len(), settings.n_sensor_nodes * settings.n_output_nodes);
