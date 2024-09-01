@@ -1,6 +1,6 @@
 
 use rustc_hash::FxHashMap;
-use super::{genome::GeneKey, phenome::NodeIndex};
+use super::{genome::GeneKey, phenome::NodeNumber};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub struct InnovationNumber(pub usize);
@@ -34,8 +34,8 @@ impl InnovationContext {
 
         for i in 0..n_sensor_nodes {
             for j in 0..n_output_nodes {
-                let in_node_id = NodeIndex(i);
-                let out_node_id = NodeIndex(j + n_sensor_nodes);
+                let in_node_id = NodeNumber(i);
+                let out_node_id = NodeNumber(j + n_sensor_nodes);
                 let gene_key = GeneKey{in_node_id, out_node_id};
                 innovation_map.insert(gene_key, innovation_number);
                 innovation_number = innovation_number.inc();

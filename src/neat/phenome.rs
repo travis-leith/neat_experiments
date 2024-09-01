@@ -1,6 +1,6 @@
 use std::ops::Index;
 use std::ops::IndexMut;
-use super::genome::GeneIndex;
+use super::genome::GeneNumber;
 
 #[derive(PartialEq, Default, Clone, Debug)]
 pub enum NodeType{
@@ -11,18 +11,18 @@ pub enum NodeType{
 }
 
 #[derive(PartialEq, PartialOrd, Clone, Copy, Hash, Eq)]
-pub struct NodeIndex(pub usize);
+pub struct NodeNumber(pub usize);
 
-impl NodeIndex {
-    pub fn inc(self) -> NodeIndex {
-        NodeIndex(self.0 + 1)
+impl NodeNumber {
+    pub fn inc(self) -> NodeNumber {
+        NodeNumber(self.0 + 1)
     }
 }
 
 #[derive(Default, Clone)]
 pub struct Node {
     pub value: f64,
-    pub inputs: Vec<GeneIndex>,
+    pub inputs: Vec<GeneNumber>,
     pub node_type: NodeType,
 }
 
@@ -66,15 +66,15 @@ impl Phenome {
     }
 }
 
-impl Index<NodeIndex> for Phenome {
+impl Index<NodeNumber> for Phenome {
     type Output = Node;
-    fn index(&self, index: NodeIndex) -> &Self::Output {
+    fn index(&self, index: NodeNumber) -> &Self::Output {
         &self.0[index.0]
     }
 }
 
-impl IndexMut<NodeIndex> for Phenome {
-    fn index_mut(&mut self, index: NodeIndex) -> &mut Self::Output {
+impl IndexMut<NodeNumber> for Phenome {
+    fn index_mut(&mut self, index: NodeNumber) -> &mut Self::Output {
         &mut self.0[index.0]
     }
 }
