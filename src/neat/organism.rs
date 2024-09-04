@@ -1,46 +1,169 @@
 use std::ops::{Index, IndexMut};
 
+use itertools::Itertools;
+use petgraph::{graph::NodeIndex, visit::{EdgeRef, Walker}, Directed, Direction, Graph};
 use rand::{seq::SliceRandom, RngCore};
+use rustc_hash::FxHashSet;
 
-use crate::neat::{genome::Genome, phenome::NodeType};
+use crate::neat::genome::Genome;
 
-use super::{genome::GeneNumber, phenome::{NodeNumber, Phenome}};
-
-// use super::network::Network;
+use super::genome::{GeneNumber, GeneValue};
 
 #[derive(Clone, Copy)]
 pub struct OrganismIndex(pub usize);
 
+#[derive(PartialEq, Default, Clone, Debug)]
+pub enum NodeType{
+    Sensor,
+    #[default]
+    Hidden,
+    Output,
+}
+
+#[derive(Clone)]
+pub struct Node {
+    pub id: usize,
+    pub value: f64,
+    pub node_type: NodeType,
+}
 
 #[derive(Clone)]
 pub struct Organism {
-    pub phenome: Phenome,
+    pub phenome: Graph<Node, f64, Directed>,
+    pub sensor_nodes: Vec<NodeIndex>,
+    pub output_nodes: Vec<NodeIndex>,
     pub genome: Genome,
-    pub activation_order: Vec<NodeNumber>,
+    pub activation_order: Vec<NodeIndex>,
     pub fitness: usize
 }
 
 impl Organism {
-    
+    pub fn print_mermaid_graph(&self) {
+        println!("graph TD");
+        for &node_index in &self.activation_order {
+            let node = &self.phenome[node_index];
+            let node_id = node.id;
+            let node_type = match node.node_type {
+                NodeType::Sensor => "S",
+                NodeType::Hidden => "H",
+                NodeType::Output => "O",
+            };
+            println!("{}[{}:{}]", node_id, node_id, node_type);
+        }
+
+        for &node_index in &self.activation_order {
+            let node = &self.phenome[node_index];
+            if node.node_type != NodeType::Sensor {
+                let incoming_edges = self.phenome.edges_directed(node_index, Direction::Incoming);
+                for edge in incoming_edges {
+                    let in_node_id = edge.source();
+                    let in_node = &self.phenome[in_node_id];
+                    let out_node_id = edge.target();
+                    let out_node = &self.phenome[out_node_id];
+                    println!("{} -->|{:.4}|{}", in_node.id, edge.weight(), out_node.id);
+                }
+            }
+        }
+    }
 
     pub fn create_from_genome(genome: Genome, initial_fitness: usize) -> Organism {
+        use rustc_hash::FxHashMap;
         //TODO remove connections involving dead end nodes
         //TODO create phenome::create_from_genome
-        let mut phenome = Phenome::create_disconnected(genome.n_sensor_nodes, genome.n_output_nodes, genome.next_node_id.0);
-        
 
-        for (i, (gene_key, gene_val)) in genome.iter().enumerate() {
-            if gene_val.enabled {
-                phenome[gene_key.out_node_id].inputs.push(GeneNumber(i));
+        let mut phenome = Graph::<Node, f64, Directed>::new();
+        let mut node_map: FxHashMap<usize, NodeIndex> = FxHashMap::default();//TODO init with capacity
+
+        fn get_node_index(node_map: &mut FxHashMap<usize, NodeIndex>, phenome: &mut Graph<Node, f64, Directed>, n_sensor_nodes: usize, n_output_nodes: usize, node_id: usize) -> NodeIndex {
+            match node_map.get(&node_id) {
+                Some(i) => *i,
+                None => {
+                    let node_type = 
+                        if node_id < n_sensor_nodes {
+                            NodeType::Sensor
+                        } else if node_id < n_sensor_nodes + n_output_nodes {
+                            NodeType::Output
+                        } else {
+                            NodeType::Hidden
+                        };
+                    let node = Node{id: node_id, value: 0., node_type};
+                    let &node_index = &phenome.add_node(node);
+                    node_map.insert(node_id, node_index);
+                    node_index
+                }
             }
         }
 
-        let activation_order = genome.rev_dfs_order_petgraph();
-        
+        for (gene_key, gene_val) in genome.iter() {
+            if gene_val.enabled {
+                let in_node_index = get_node_index(&mut node_map, &mut phenome, genome.n_sensor_nodes, genome.n_output_nodes, gene_key.in_node_id);
+                let out_node_index = get_node_index(&mut node_map, &mut phenome, genome.n_sensor_nodes, genome.n_output_nodes, gene_key.out_node_id);
+                phenome.add_edge(in_node_index, out_node_index, gene_val.weight);
+            }
+        }
+
+        let dangling_node = get_node_index(&mut node_map, &mut phenome, genome.n_sensor_nodes, genome.n_output_nodes, genome.next_node_id);
+        for i in 0..genome.n_sensor_nodes {
+            let node_index = get_node_index(&mut node_map, &mut phenome, genome.n_sensor_nodes, genome.n_output_nodes, i);
+            phenome.add_edge(dangling_node, node_index, 0.0);
+        }
+
+        let dfs = petgraph::visit::DfsPostOrder::new(&phenome, dangling_node);
+        let mut order_forward_set:FxHashSet<_> = dfs.iter(&phenome).collect();
+        order_forward_set.remove(&dangling_node);
+        // order_forward.pop(); //remove dangling node
+
+        // for &node_index in &order_forward {
+        //     let node = &phenome[node_index];
+        //     println!("order_forward node {:?}", node.id);
+        // }
+
+        // phenome.remove_node(dangling_node); //assuming this is safe to do as long as it is the last node
+
+        let dangling_node2 = get_node_index(&mut node_map, &mut phenome, genome.n_sensor_nodes, genome.n_output_nodes, genome.next_node_id + 1);
+        for i in genome.n_sensor_nodes..genome.n_sensor_nodes + genome.n_output_nodes {
+            let node_index = get_node_index(&mut node_map, &mut phenome, genome.n_sensor_nodes, genome.n_output_nodes, i);
+            phenome.add_edge(node_index, dangling_node2, 0.0);
+        }
+
+        phenome.reverse();
+        let dfs = petgraph::visit::DfsPostOrder::new(&phenome, dangling_node2);
+        let mut order_backward = dfs.iter(&phenome).collect_vec();
+        order_backward.pop(); //remove dangling node
+
+        // for &node_index in &order_backward {
+        //     let node = &phenome[node_index];
+        //     println!("order_backward node {:?}", node.id);
+        // }
+
+        // phenome.remove_node(dangling_node2); //assuming this is safe to do as long as it is the last node
+
+        // let forward_set: std::collections::HashSet<_> = order_forward.into_iter().collect();
+        let backward_intersection: Vec<_> = order_backward.into_iter().filter(|&x| order_forward_set.contains(&x)).collect();
+
+        // for &node_index in &backward_intersection {
+        //     let node = &phenome[node_index];
+        //     println!("backward_intersection node {:?}", node.id);
+        // }
+
+        let sensor_nodes = 
+            (0..genome.n_sensor_nodes)
+            .map(|i| get_node_index(&mut node_map, &mut phenome, genome.n_sensor_nodes, genome.n_output_nodes, i))
+            .collect_vec();
+
+        let output_nodes =
+            (genome.n_sensor_nodes..genome.n_sensor_nodes + genome.n_output_nodes)
+            .map(|i| get_node_index(&mut node_map, &mut phenome, genome.n_sensor_nodes, genome.n_output_nodes, i))
+            .collect_vec();
+
+        phenome.reverse(); //TODO start with reveersed graph so that only 1 reversal is required
+
         Organism {
             phenome,
             genome,
-            activation_order,
+            sensor_nodes,
+            output_nodes,
+            activation_order: backward_intersection,
             fitness: initial_fitness
         }
     }
@@ -64,32 +187,38 @@ impl Organism {
         // }
 
         for (i, &input) in sensor_values.iter().enumerate() {
-            self.phenome[NodeNumber(i)].value = input;
+            let node_index = self.sensor_nodes[i];
+            self.phenome[node_index].value = input;
         }
 
         for &node_index in &self.activation_order {
             let node = &self.phenome[node_index];
-            if node.node_type == NodeType::Sensor {
-                continue;
+            if node.node_type != NodeType::Sensor { //TODO remove sensor nodes from activation ordeer
+                let incoming_edges = self.phenome.edges_directed(node_index, Direction::Incoming);
+                // debug_assert!(node.node_type != NodeType::Sensor);
+                
+
+                let active_sum = incoming_edges.fold(0., |acc, edge| {
+                    acc + *edge.weight() * self.phenome[edge.source()].value
+                });
+
+                let incoming_edges = self.phenome.edges_directed(node_index, Direction::Incoming);
+
+                let weighted_inputs = incoming_edges.map(|edge| {
+                    *edge.weight() * self.phenome[edge.source()].value
+                }).collect_vec();
+
+                self.phenome[node_index].value = relu(active_sum);
             }
-            let active_sum = node.inputs.iter().fold(0., |acc, gene_index| {
-                let (gene_key, gene_value) = &self.genome.get_index(*gene_index);
-                if gene_value.enabled {
-                    acc + gene_value.weight * self.phenome[gene_key.in_node_id].value
-                } else {
-                    acc
-                }
-            });
-            self.phenome[node_index].value = relu(active_sum);
         }
 
-        let outputs = self.phenome.iter().skip(self.genome.n_sensor_nodes).take(self.genome.n_output_nodes).map(|node| node.value).collect();
+        let outputs = self.output_nodes.iter().map(|&node_index| self.phenome[node_index].value).collect();
         outputs
     }
 
     pub fn clear_values(&mut self) {
-        for node in self.phenome.iter_mut() {
-            node.value = 0.;
+        for &node_index in &self.activation_order {
+            self.phenome[node_index].value = 0.;
         }
     }
 }
@@ -157,10 +286,10 @@ impl<'a> IntoParallelRefMutIterator<'a> for Organisms {
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use crate::neat::{genome::{Gene, GeneExt, GeneNumber, GeneKey, Genome}, organism::Organism, phenome::{Node, NodeNumber, NodeType}};
+    use crate::neat::{genome::{Gene, GeneExt, GeneKey, GeneNumber, GeneValue, Genome}, innovation::InnovationNumber, organism::{NodeType, Organism}};
     use assert_approx_eq::assert_approx_eq;
     use itertools::Itertools;
-    use petgraph::{data::Build, visit::{IntoNodeIdentifiers, IntoNodeReferences}, Directed};
+    use petgraph::{data::Build, visit::{EdgeRef, IntoNodeIdentifiers, IntoNodeReferences, NodeCount, NodeRef}, Directed};
 
     fn genome_sample_feed_forward_1() -> Genome{
         Genome::create(vec![
@@ -191,7 +320,7 @@ mod tests {
             Gene::create(4, 2, 0.0, 1, true),
             Gene::create(7, 6, 0.0, 2, true),
             Gene::create(4, 6, 0.0, 3, true),
-            Gene::create(4, 18, 0.0, 4, true),
+            Gene::create(4, 8, 0.0, 4, true),
             Gene::create(6, 5, 0.0, 5, true),
             Gene::create(5, 4, 0.0, 6, true),
             Gene::create(1, 5, 0.0, 7, true),
@@ -202,10 +331,7 @@ mod tests {
     #[test]
     fn network_creation() {
         let network =  Organism::create_from_genome(genome_sample_feed_forward_1(), 0);
-        assert_eq!(network.phenome.len(), 6);
-        assert_eq!(network.phenome[NodeNumber(2)].inputs.len(), 1);
-        assert_eq!(network.phenome[NodeNumber(3)].inputs.len(), 2);
-        assert_eq!(network.phenome[NodeNumber(4)].inputs.len(), 1);
+        assert_eq!(network.phenome.node_count(), 6);
     }
 
     #[test]
@@ -217,25 +343,17 @@ mod tests {
         let network = Organism::init(&mut rng, n_sensor_nodes, n_output_nodes, 0);
         assert_eq!(network.genome.get_index(GeneNumber(89)).1.innovation.0, 89);
         assert_eq!(network.genome.len(), 90);
-        assert_eq!(network.phenome.len(), n_total);
+        assert_eq!(network.phenome.node_count(), n_total);
         assert_eq!(network.genome.n_output_nodes, n_output_nodes);
         assert_eq!(network.genome.n_sensor_nodes, n_sensor_nodes);
-
-        for node_index in network.genome.n_sensor_nodes..network.phenome.len() {
-            let node = &network.phenome[NodeNumber(node_index)];
-            let l = node.inputs.len();
-            assert_eq!(l, n_sensor_nodes)
-        }
     }
 
     #[test]
     fn feed_forward() {
         let genome = genome_sample_feed_forward_1();
         let mut organism =  Organism::create_from_genome(genome, 0);
-
+        organism.print_mermaid_graph();
         let output = organism.activate(&vec![0.5, -0.2]);
-        assert_approx_eq!(organism.phenome[NodeNumber(2)].value, 0.184);
-        assert_approx_eq!(organism.phenome[NodeNumber(3)].value, 0.);
 
         assert_approx_eq!(output[0], 0.184);
         assert_approx_eq!(output[1], 0.);
@@ -258,166 +376,25 @@ mod tests {
         
     }
 
-    fn digraph_from_organism(organism: &Organism) -> petgraph::Graph<NodeNumber, GeneNumber> {
-        let mut graph = petgraph::graph::DiGraph::new();
-        let distinct_nodes = organism.genome.iter().map(|(gene_key, _)| {
-            vec![gene_key.in_node_id, gene_key.out_node_id]
-        }).flatten().collect::<HashSet<_>>();
-
-
-        for i in distinct_nodes {
-            graph.add_node(i);
-        }
-
-
-        fn make_node_index(i: NodeNumber) -> petgraph::graph::NodeIndex {
-            petgraph::graph::NodeIndex::new(i.0)
-        }
-        for (gene_key, _) in organism.genome.iter() {
-            println!("{:?}-->{:?}", gene_key.in_node_id.0, gene_key.out_node_id.0);
-            // println!("in node exists {:?}", graph(gene_key.in_node_id.0));
-            // let in_index = graph.node_references()
-            graph.add_edge(make_node_index(gene_key.in_node_id), make_node_index(gene_key.out_node_id), GeneNumber(0));
-        }
-
-        graph
-    }
-
     
-    fn digraph_from_genome(genome: &Genome) -> petgraph::graph::DiGraph<(), (), usize> {
-        let edges = genome.iter().map(|(gene_key, _)| {
-            (gene_key.in_node_id.0, gene_key.out_node_id.0)
-        }).collect_vec();
-
-        let res = petgraph::graph::DiGraph::from_edges(edges);
-        res
-    }
-
-    fn my_activation_order(organism: &Organism, visited: &mut HashMap<NodeNumber, bool>, acc: &mut Vec<GeneNumber>, nodes: &Vec<NodeNumber>) -> Option<Vec<GeneNumber>> {
-        let res =
-            nodes.iter().map(|node_index| {
-                match visited.get(node_index) {
-                    Some(true) => Some(vec![]),
-                    Some(false) => None,
-                    None => {
-                        if organism.phenome[*node_index].node_type == NodeType::Sensor {
-                            visited.insert(*node_index, true);
-                            Some(vec![])
-                        } else {
-                            if organism.phenome[*node_index].inputs.len() == 0 {
-                                visited.insert(*node_index, false);
-                                None
-                            } else {
-                                let input_nodes = 
-                                    organism.phenome[*node_index].inputs.iter().map(|gene_index| {
-                                        let (gene_key, _) = organism.genome.get_index(*gene_index);
-                                        gene_key.in_node_id
-                                    }).collect();
-                                match my_activation_order(organism, visited, acc, &input_nodes) {
-                                    Some(mut temp) => {
-                                        // temp.extend(acc);
-                                        visited.insert(*node_index, true);
-                                        Some(temp)
-                                    },
-                                    None => {
-                                        visited.insert(*node_index, false);
-                                        None
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-            }).collect_vec();
-        None
-    }
-
-    // fn petgtaph_activation_order(organism: &Organism) -> Vec<GeneIndex> {
-    //     let graph = digraph_from_genome(organism);
-    //     let mut dfs = petgraph::visit::DfsPostOrder::empty(&graph);
-    //     let mut order = vec![];
-    //     while let Some(nx) = dfs.next(&graph) {
-    //         order.push(nx);
-    //     }
-    //     order.iter().map(|nx| graph[nx].clone()).collect()
-    // }
-
-    #[test]
-    fn test_dead_ends(){
-        let genome = genome_sample_dead_ends();
-        let organism =  Organism::create_from_genome(genome, 0);
-
-        for (gene_key, _) in organism.genome.iter() {
-            println!("{:?}-->{:?}", gene_key.in_node_id.0, gene_key.out_node_id.0);
-        }
-
-        println!("activation order");
-        for &node_index in &organism.activation_order {
-            let node = &organism.phenome[node_index];
-            node.inputs.iter().for_each(|gene_index| {
-                let (gene_key, _) = organism.genome.get_index(*gene_index);
-                println!("{:?}-->{:?}", gene_key.in_node_id.0, gene_key.out_node_id.0);
-            });
-        }
-    }
-
-
     #[test]
     fn test_cyclic_bfs_order() {
         let genome = genome_sample_dead_ends();
-        // let organism =  Organism::create_from_genome(genome, 0);
-        // println!("phenome size {:?}", organism.phenome.len());
-        let graph = digraph_from_genome(&genome);
         println!("genome size {:?}", genome.len());
-        println!("graph size {:?}", graph.node_count());
-        let tarjan_scc = petgraph::algo::tarjan_scc(&graph);
-
-        for scc in tarjan_scc {
-            println!("scc len{:?}", scc.len());
-            for node in scc {
-                println!("node {:?}", node);
-            }
-        }
-    }
-
-    #[test]
-    fn test_digraph() {
-        let edges = vec![
-            (0, 4),
-            (4, 2),
-            (7, 6),
-            (4, 6),
-            (4, 18),
-            (6, 5),
-            (5, 4),
-            (1, 5),
-            (5, 3),
-        ];
-
-        let distinct_nodes = edges.iter().map(|(a, b)| vec![*a, *b]).flatten().collect::<HashSet<_>>();
-        let mut graph = petgraph::graph::DiGraph::new();
-        let mut node_map = HashMap::new();
-        for &i in &distinct_nodes {
-            let node = graph.add_node(i);
-            node_map.insert(i, node);
-        }
-
-        for (a, b) in edges {
-            graph.add_edge(node_map[&a], node_map[&b], ());
-        }
-
-        println!("nodes size {:?}", distinct_nodes.len());
-        println!("graph size {:?}", graph.node_count());
-
-        let tarjan_scc = petgraph::algo::tarjan_scc(&graph);
+        let organism =  Organism::create_from_genome(genome, 0);
+        // println!("phenome size {:?}", organism.phenome.len());
+        
+        println!("graph size {:?}", organism.phenome.node_count());
+        let tarjan_scc = petgraph::algo::tarjan_scc(&organism.phenome);
 
         for scc in tarjan_scc {
             println!("scc len{:?}", scc.len());
             for node_index in scc {
-                let node = graph.node_weight(node_index).unwrap();
-                println!("node {:?}", node);
+                let node = &organism.phenome[node_index];
+                println!("node {:?}", node.id);
             }
         }
     }
+
+ 
 }

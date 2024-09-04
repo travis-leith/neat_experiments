@@ -3,6 +3,7 @@
 extern crate neat_experiments;
 use itertools::Itertools;
 use neat_experiments::neat::{common::Settings, organism::Organism, population::TurnBasedArena};
+use petgraph::{visit::EdgeRef, Direction};
 use rand_xoshiro::Xoshiro256PlusPlus;
 mod tictactoe;
 
@@ -180,23 +181,13 @@ fn print_best_genome(population: &Population) {
         .map(|s| &population.organisms[s.champion])
         .max_by_key(|o| o.fitness).unwrap().clone();
 
-    for &node_index in &best_org.activation_order {
-        let node = &best_org.phenome[node_index];
-        node.inputs.iter().for_each(|gene_index| {
-            let (gene_key, gene_value) = best_org.genome.get_index(*gene_index);
-            println!("{:?}---|{:.4}|{:?}", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0);
-        });
-    }
+    best_org.print_mermaid_graph();
 }
 
 fn test_tictactoe() {
     let mut settings = Settings::standard(10, 9);
     settings.n_organisms = 200;
-    settings.mutate_weight_rate = 0.1;
-    settings.mutate_weight_scale = 0.1;
-    settings.mutate_add_connection_rate = 0.03;
-    settings.mutate_add_node_rate = 0.05;
-    settings.initial_fitness = 0;
+
 
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
     let mut population = Population::init(&mut rng, &settings);
@@ -208,7 +199,7 @@ fn test_tictactoe() {
     describe_population_fitness(&population);
 
 
-    for _ in 0..10000 {
+    for _ in 0..200 {
         population.next_generation(&mut rng, &settings);
         if population.generation % 20 == 0 {
             println!("generation: {:?}", population.generation);

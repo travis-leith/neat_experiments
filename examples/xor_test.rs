@@ -2,6 +2,7 @@ extern crate neat_experiments;
 
 
 use neat_experiments::neat::{common::Settings, organism::Organism, population::SinglePlayerArena};
+use petgraph::{visit::EdgeRef, Direction};
 use rand::SeedableRng;
 // use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -59,7 +60,7 @@ fn describe_population_fitness(population: &Population) {
 fn get_solution_organism(population: &Population) -> Option<&Organism> {
     for s in population.species.iter() {
         let champion = &population.organisms[s.champion];
-        if champion.fitness > 39900 {
+        if champion.fitness > 39995 {
             return Some(champion);
         }
     }
@@ -70,7 +71,7 @@ fn main() {
     let mut settings = Settings::standard(3, 1);
     settings.n_organisms = 1000;
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(12345);
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
     let mut population = Population::init(&mut rng, &settings);
 
     let mut evaluator = XorEvaluator;
@@ -82,25 +83,12 @@ fn main() {
     for _ in 0..500 {
         population.next_generation(&mut rng, &settings);
         describe_population_demographics(&population);
-        // population.evaluate(&mut evaluator);
         population.evaluate_single_player(&mut evaluator, true);
         describe_population_fitness(&population);
 
         if let Some(solution_org) = get_solution_organism(&population) {
             println!("solution found");
-            for (gene_key, gene_value) in solution_org.genome.iter() {
-                if gene_value.enabled {
-                    println!("{:?}---|{:.4}|{:?}", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0);
-                }
-            }
-            println!("activation order");
-            for &node_index in &solution_org.activation_order {
-                let node = &solution_org.phenome[node_index];
-                node.inputs.iter().for_each(|gene_index| {
-                    let (gene_key, gene_value) = solution_org.genome.get_index(*gene_index);
-                    println!("{:?}---|{:.4}|{:?}", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0);
-                });
-            }
+            solution_org.print_mermaid_graph();
 
             let mut cloned_org = Organism::create_from_genome(solution_org.genome.clone(), 0);
             check_evaluation(&mut cloned_org);
