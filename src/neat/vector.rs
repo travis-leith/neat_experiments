@@ -1,4 +1,4 @@
-use fxhash::FxBuildHasher;
+use rustc_hash::FxBuildHasher;
 use indexmap::IndexMap;
 
 #[derive(Copy, Clone)]

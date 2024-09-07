@@ -1,23 +1,30 @@
-use itertools::Itertools;
-use petgraph::visit::Walker;
 use rand::{RngCore, Rng};
 use rand_distr::{Distribution, Normal, Uniform};
 use indexmap::IndexMap;
-use fxhash::FxBuildHasher;
+use rustc_hash::FxBuildHasher;
 
 type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 
 use crate::neat::vector::{AllignedTuplePair, allign_indexmap_map, allign_indexmap_iter};
 
-use super::{common::Settings, innovation::{InnovationContext, InnovationNumber}, phenome::NodeIndex};
+use super::{common::Settings, innovation::{InnovationContext, InnovationNumber}};
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct GeneIndex(pub usize);
 
+#[derive(PartialEq, PartialOrd, Clone, Copy, Eq, Hash)]
+pub struct NodeId(pub usize);
+
+impl NodeId {
+    pub fn inc(self) -> NodeId {
+        NodeId(self.0 + 1)
+    }
+}
+
 #[derive(Hash, Eq, PartialEq, Clone)]
 pub struct GeneKey {
-    pub in_node_id: NodeIndex,
-    pub out_node_id: NodeIndex
+    pub in_node_id: NodeId,
+    pub out_node_id: NodeId
 }
 
 #[derive(Clone)]
@@ -47,8 +54,8 @@ impl GeneExt for Gene {
     fn create(in_node_id: usize, out_node_id: usize, weight: f64, innovation: usize, enabled: bool) -> Gene {
         (
             GeneKey {
-                in_node_id: NodeIndex(in_node_id),
-                out_node_id: NodeIndex(out_node_id),
+                in_node_id: NodeId(in_node_id),
+                out_node_id: NodeId(out_node_id),
             },
             GeneValue::create(weight, innovation, enabled),
         )
@@ -58,7 +65,7 @@ impl GeneExt for Gene {
 #[derive(Clone)]
 pub struct Genome{
     data: FxIndexMap<GeneKey, GeneValue>,
-    pub next_node_id: NodeIndex,
+    pub next_node_id: NodeId,
     pub n_sensor_nodes: usize,
     pub n_output_nodes: usize,
 }
@@ -69,7 +76,7 @@ impl Genome {
     }
 
     pub fn create(genes: Vec<Gene>, n_sensor_nodes: usize, n_output_nodes: usize) -> Genome {
-        let max_node_id = genes.iter().fold(NodeIndex(0), |acc, (gene_key, _)| {
+        let max_node_id = genes.iter().fold(NodeId(0), |acc, (gene_key, _)| {
             if gene_key.in_node_id > acc {
                 gene_key.in_node_id
             } else if gene_key.out_node_id > acc {
@@ -99,7 +106,7 @@ impl Genome {
             }
         }
 
-        let next_node_id = NodeIndex(n_sensor_nodes + n_output_nodes);
+        let next_node_id = NodeId(n_sensor_nodes + n_output_nodes);
 
         Genome{data, next_node_id, n_sensor_nodes, n_output_nodes}
     }
@@ -116,34 +123,34 @@ impl Genome {
         self.data.get_index_mut(index.0).unwrap()
     }
 
-    pub fn rev_dfs_order_petgraph(&self) -> Vec<NodeIndex> {
-        //TODO implement a version of this that ignores dead end nodes
-        use petgraph::graph::DiGraph;
-        let new_node_id = self.next_node_id.0;
-        let start_edges = 
-            (0..self.n_sensor_nodes).map(|i| (new_node_id, i));
+    // pub fn rev_dfs_order_petgraph(&self) -> Vec<NodeIndex> {
+    //     //TODO implement a version of this that ignores dead end nodes
+    //     use petgraph::graph::DiGraph;
+    //     let new_node_id = self.next_node_id.0;
+    //     let start_edges = 
+    //         (0..self.n_sensor_nodes).map(|i| (new_node_id, i));
 
-        let edges = 
-            self.data.iter()
-            .filter(|(_, gene)| gene.enabled)
-            .map(|(gene_key, _)| (gene_key.in_node_id.0, gene_key.out_node_id.0));
+    //     let edges = 
+    //         self.data.iter()
+    //         .filter(|(_, gene)| gene.enabled)
+    //         .map(|(gene_key, _)| (gene_key.in_node_id.0, gene_key.out_node_id.0));
 
-        let all_edges = edges.chain(start_edges);
+    //     let all_edges = edges.chain(start_edges);
         
-        let graph: petgraph::graph::DiGraph<(), (), usize> = DiGraph::from_edges(all_edges);
+    //     let graph: petgraph::graph::DiGraph<(), (), usize> = DiGraph::from_edges(all_edges);
 
-        let dfs = petgraph::visit::DfsPostOrder::new(&graph, new_node_id.into());
+    //     let dfs = petgraph::visit::DfsPostOrder::new(&graph, new_node_id.into());
 
-        dfs.iter(&graph)
-        .map(|node| NodeIndex(node.index()))
-        .take_while(|node| node.0 != new_node_id)
-        .collect_vec()
-        .into_iter()
-        .rev()
-        .collect()
-    }
+    //     dfs.iter(&graph)
+    //     .map(|node| NodeIndex(node.index()))
+    //     .take_while(|node| node.0 != new_node_id)
+    //     .collect_vec()
+    //     .into_iter()
+    //     .rev()
+    //     .collect()
+    // }
 
-    pub fn add_connection(&mut self, innovation_context: &mut InnovationContext, in_node_id: NodeIndex, out_node_id: NodeIndex, weight: f64) {
+    pub fn add_connection(&mut self, innovation_context: &mut InnovationContext, in_node_id: NodeId, out_node_id: NodeId, weight: f64) {
         debug_assert!(in_node_id != out_node_id, "Tried to add a connection where input is the same node as output");
         debug_assert!(in_node_id < self.next_node_id, "Tried to add a connection with an input node that does not exist");
         debug_assert!(out_node_id < self.next_node_id, "Tried to add a connection with an output node that does not exist");
@@ -261,8 +268,8 @@ impl Genome {
     fn mutate_add_connection<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, innovation_context: &mut InnovationContext, settings: &Settings) {
         let r = between.sample(rng);
         if r < settings.mutate_add_connection_rate {
-            let in_node_id = NodeIndex(rng.gen_range(0..self.next_node_id.0));
-            let out_node_id = NodeIndex(rng.gen_range(self.n_sensor_nodes..self.next_node_id.0));
+            let in_node_id = NodeId(rng.gen_range(0..self.next_node_id.0));
+            let out_node_id = NodeId(rng.gen_range(self.n_sensor_nodes..self.next_node_id.0));
             if in_node_id != out_node_id {
                 let gene_key = GeneKey{in_node_id, out_node_id};
                 if !self.data.contains_key(&gene_key) {
@@ -291,6 +298,8 @@ impl Genome {
         }
     }
 }
+
+
 
 pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: usize, genome_2: &Genome, fitness_2: usize) -> Genome {
     let between = Uniform::from(0.0..1.0);
@@ -330,7 +339,7 @@ pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: usize, 
 
     let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
     let new_genome_data = allign_indexmap_map(&genome_1.data, &genome_2.data, &get_id, &mut choose_gene);
-    let new_next_node_id = NodeIndex(std::cmp::max(genome_1.next_node_id.0, genome_2.next_node_id.0));
+    let new_next_node_id = NodeId(std::cmp::max(genome_1.next_node_id.0, genome_2.next_node_id.0));
     let new_genome = Genome{data: new_genome_data, next_node_id: new_next_node_id, n_sensor_nodes:genome_1.n_sensor_nodes, n_output_nodes:genome_1.n_output_nodes};
     new_genome
 }
@@ -383,7 +392,7 @@ mod tests {
     fn test_genome_add_connection() {
         let mut genome = genome_sample_1();
         let mut innovation_context = InnovationContext::init(2, 2);
-        genome.add_connection(&mut innovation_context, NodeIndex(0), NodeIndex(4), 0.0);
+        genome.add_connection(&mut innovation_context, NodeId(0), NodeId(4), 0.0);
         assert_eq!(genome.len(), 6);
     }
 
@@ -431,21 +440,21 @@ mod tests {
     //     });
     // }
 
-    #[test]
-    fn test_dfs_order2(){
-        let genome = genome_sample_recurrent_1();
+    // #[test]
+    // fn test_dfs_order2(){
+    //     let genome = genome_sample_recurrent_1();
 
-        for (gene_key, gene_value) in genome.data.iter() {
-            println!("{:?}---|{:.4}|{:?}", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0);
-        }
+    //     for (gene_key, gene_value) in genome.data.iter() {
+    //         println!("{:?}---|{:.4}|{:?}", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0);
+    //     }
 
-        println!("rev dfs order");
-        let dfs_order = genome.rev_dfs_order_petgraph();
+    //     println!("rev dfs order");
+    //     let dfs_order = genome.rev_dfs_order_petgraph();
 
-        for node_index in dfs_order {
-            println!("{:?}", node_index.0);
-        }
+    //     for node_index in dfs_order {
+    //         println!("{:?}", node_index.0);
+    //     }
 
-    }
+    // }
 
 }

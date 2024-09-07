@@ -88,21 +88,8 @@ fn main() {
 
         if let Some(solution_org) = get_solution_organism(&population) {
             println!("solution found");
-            for (gene_key, gene_value) in solution_org.genome.iter() {
-                if gene_value.enabled {
-                    println!("{:?}---|{:.4}|{:?}", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0);
-                }
-            }
-            println!("activation order");
-            for &node_index in &solution_org.activation_order {
-                let node = &solution_org.phenome[node_index];
-                node.inputs.iter().for_each(|gene_index| {
-                    let (gene_key, gene_value) = solution_org.genome.get_index(*gene_index);
-                    println!("{:?}---|{:.4}|{:?}", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0);
-                });
-            }
-
-            let mut cloned_org = Organism::create_from_genome(solution_org.genome.clone(), 0);
+            solution_org.phenome.print_mermaid_graph();
+            let mut cloned_org = Organism::create_from_genome(solution_org.genome.clone());
             check_evaluation(&mut cloned_org);
 
             

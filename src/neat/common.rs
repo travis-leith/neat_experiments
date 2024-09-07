@@ -11,7 +11,6 @@ pub struct Settings {
     pub mutate_weight_scale: f64,
     pub n_species_min: usize,
     pub n_species_max: usize,
-    pub initial_fitness: usize //TODO come up with a better abstract for this. Maybe a generic wrapper for an organism somehow
     //TODO add more settings
     //inter_species_mating_rate
     //intra_species_mating_rate
@@ -33,7 +32,6 @@ impl Settings {
             mutate_add_node_rate: 0.01,
             n_species_min: 20,
             n_species_max: 40,
-            initial_fitness: 0
         }
     }
 }

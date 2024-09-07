@@ -86,7 +86,7 @@ impl Population {
         let mut organisms = Vec::new();
 
         for _ in 0..settings.n_organisms {
-            let organism = Organism::init(rng, settings.n_sensor_nodes, settings.n_output_nodes, settings.initial_fitness);
+            let organism = Organism::init(rng, settings.n_sensor_nodes, settings.n_output_nodes);
             organisms.push(organism);
         }
 
@@ -241,12 +241,12 @@ impl Population {
                 let parent_2 = &self.organisms[parent_2_index];
                 let mut child_genome = genome::cross_over(rng, &parent_1.genome, parent_1.fitness, &parent_2.genome, parent_2.fitness);
                 child_genome.mutate(rng, &mut self.innovation_context, settings);
-                let child = Organism::create_from_genome(child_genome, settings.initial_fitness);
+                let child = Organism::create_from_genome(child_genome);
                 new_population.push(child);
             }
 
             if n_offspring > 0 {
-                let champion = Organism::create_from_genome(self.organisms[s.champion].genome.clone(), settings.initial_fitness);
+                let champion = Organism::create_from_genome(self.organisms[s.champion].genome.clone());
                 new_population.push(champion);
             }
         }
