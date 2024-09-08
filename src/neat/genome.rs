@@ -123,33 +123,6 @@ impl Genome {
         self.data.get_index_mut(index.0).unwrap()
     }
 
-    // pub fn rev_dfs_order_petgraph(&self) -> Vec<NodeIndex> {
-    //     //TODO implement a version of this that ignores dead end nodes
-    //     use petgraph::graph::DiGraph;
-    //     let new_node_id = self.next_node_id.0;
-    //     let start_edges = 
-    //         (0..self.n_sensor_nodes).map(|i| (new_node_id, i));
-
-    //     let edges = 
-    //         self.data.iter()
-    //         .filter(|(_, gene)| gene.enabled)
-    //         .map(|(gene_key, _)| (gene_key.in_node_id.0, gene_key.out_node_id.0));
-
-    //     let all_edges = edges.chain(start_edges);
-        
-    //     let graph: petgraph::graph::DiGraph<(), (), usize> = DiGraph::from_edges(all_edges);
-
-    //     let dfs = petgraph::visit::DfsPostOrder::new(&graph, new_node_id.into());
-
-    //     dfs.iter(&graph)
-    //     .map(|node| NodeIndex(node.index()))
-    //     .take_while(|node| node.0 != new_node_id)
-    //     .collect_vec()
-    //     .into_iter()
-    //     .rev()
-    //     .collect()
-    // }
-
     pub fn add_connection(&mut self, innovation_context: &mut InnovationContext, in_node_id: NodeId, out_node_id: NodeId, weight: f64) {
         debug_assert!(in_node_id != out_node_id, "Tried to add a connection where input is the same node as output");
         debug_assert!(in_node_id < self.next_node_id, "Tried to add a connection with an input node that does not exist");

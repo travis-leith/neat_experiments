@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ops::Index;
 use std::ops::IndexMut;
 
@@ -16,7 +17,7 @@ pub enum NodeType{
     Output,
 }
 
-#[derive(PartialEq, PartialOrd, Clone, Copy, Hash, Eq)]
+#[derive(PartialEq, PartialOrd, Clone, Copy, Hash, Eq, Debug)]
 pub struct NodeIndex(pub usize);
 
 impl NodeIndex {
@@ -25,7 +26,7 @@ impl NodeIndex {
     }
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct EdgeIndex(pub usize);
 
 #[derive(Clone)]
@@ -142,47 +143,157 @@ pub struct Phenome{
 }
 
 struct VisitedRecord {
-    can_come_from_sensor: bool,
+    can_come_from_sensor: Option<bool>,
     depth: usize,
     inputs: Vec<(NodeIndex, f64)>
 }
 
-fn can_come_from_sensor(visited: &mut FxHashMap<NodeIndex, VisitedRecord>, nodes: &NodeMap, edges: &Vec<Edge>, current_node: NodeIndex, current_depth: usize) -> (bool, Vec<(NodeIndex, f64)>) {
+fn can_come_from_sensor(visited: &mut FxHashMap<NodeIndex, VisitedRecord>, nodes: &NodeMap, edges: &Vec<Edge>, current_node: NodeIndex, current_depth: usize) -> (Option<bool>, Vec<(NodeIndex, f64)>) {
     let node = &nodes[current_node];
     println!("start processing {}:{} with depth {}", current_node.0, node.id.0, current_depth);
     let mut inputs = vec![];
     let res = 
         if node.node_type == NodeType::Sensor {
             println!("{}:{} is a sensor", current_node.0, node.id.0);
-            true
+            Some(true)
         } else if node.inputs.len() == 0 {
             println!("{}:{} has no inputs", current_node.0, node.id.0);
-            false
+            Some(false)
         } else {
-            node.inputs.iter().fold(false, |acc, elem| {
+            node.inputs.iter().fold(None, |acc, elem| {
                 let edge = &edges[elem.0];
-                println!("processing input {}:? for node {}:{}", edge.source.0, edge.target.0, node.id.0);
+                println!("\tfor node {}:{}, processing input {}:{}", edge.target.0, node.id.0, edge.source.0, nodes[edge.source].id.0);
 
                 match visited.get(&edge.source) {
                     Some(v) => {
-                        println!("already visited index {}:?", edge.source.0);
-                        if v.can_come_from_sensor {
-                            inputs.push((edge.source, edge.weight));
+                        println!("\tfor node {}:{}, already visited index {}:{}", edge.target.0, node.id.0, edge.source.0, nodes[edge.source].id.0);
+                        match v.can_come_from_sensor {
+                            Some(b) => {
+                                println!("\tfor node {}:{}, index {}:{} can_come_from_sensor is {}", edge.target.0, node.id.0, edge.source.0, nodes[edge.source].id.0, b);
+                                if b {
+                                    inputs.push((edge.source, edge.weight));
+                                }
+                                acc.map(|a| a || b).or(Some(b))
+                            },
+                            None => {
+                                println!("\tfor node {}:{}, index {}:{} can_come_from_sensor is not yet set", edge.target.0, node.id.0, edge.source.0, nodes[edge.source].id.0);
+                                acc
+                            }
                         }
-                        acc || v.can_come_from_sensor
                     },
                     None => {
-                        println!("not yet visited index {}:?", edge.source.0);
-                        let v = VisitedRecord{can_come_from_sensor: false, depth: current_depth, inputs: Vec::new()};
+                        println!("\tfor node {}:{}, not yet visited index {}:{}, initialising with None", edge.target.0, node.id.0, edge.source.0, nodes[edge.source].id.0);
+                        let v = VisitedRecord{can_come_from_sensor: None, depth: current_depth, inputs: Vec::new()};
                         visited.insert(edge.source, v);
-                        let (b, local_inputs) = can_come_from_sensor(visited, nodes, edges, edge.source, current_depth + 1);
+                        let (b_opt, local_inputs) = can_come_from_sensor(visited, nodes, edges, edge.source, current_depth + 1);
                         let v_mut = visited.get_mut(&edge.source).unwrap();
-                        v_mut.can_come_from_sensor = b;
+                        // println!("setting index {}:{} can_come_from_sensor to {}", edge.source.0, nodes[edge.source].id.0, b);
+                        v_mut.can_come_from_sensor = b_opt;
                         v_mut.inputs = local_inputs;
-                        if b {
-                            inputs.push((edge.source, edge.weight));
+                        match b_opt {
+                            Some(b) => {
+                                if b {
+                                    inputs.push((edge.source, edge.weight));
+                                }
+                                acc.map(|a| a || b).or(Some(b))
+                            },
+                            None => {
+                                acc
+                            }
                         }
-                        acc || b
+                    }
+                }
+
+            })
+        };
+    (res, inputs)
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+enum NodeStatus {
+    Unknown,
+    Yes,
+    No
+}
+
+impl NodeStatus {
+    fn plus(&self, other: &NodeStatus) -> NodeStatus {
+        match (self, other) {
+            (NodeStatus::Yes, _) => NodeStatus::Yes,
+            (_, NodeStatus::Yes) => NodeStatus::Yes,
+            (NodeStatus::Unknown, _) => NodeStatus::Unknown,
+            (_, NodeStatus::Unknown) => NodeStatus::Unknown,
+            _ => NodeStatus::No
+        }
+    }
+}
+
+struct VisitedRecord2 {
+    can_come_from_sensor: NodeStatus,
+    depth: usize,
+    inputs: Vec<(NodeIndex, f64, NodeStatus)>
+}
+
+// impl VisitedRecord2 {
+//     fn plus(&self, )
+// }
+//TODO use the Edges wrapper instead of Vec<Edge>
+fn can_come_from_sensor2(visited: &mut FxHashMap<NodeIndex, VisitedRecord2>, nodes: &NodeMap, edges: &Vec<Edge>, current_node: NodeIndex, current_depth: usize) -> (NodeStatus, Vec<(NodeIndex, f64, NodeStatus)>) {
+    let node = &nodes[current_node];
+    println!("start processing {}:{} with depth {}", current_node.0, node.id.0, current_depth);
+    let mut inputs: Vec<(NodeIndex, f64, NodeStatus)> = vec![];
+    let res : NodeStatus = 
+        if node.node_type == NodeType::Sensor {
+            println!("{}:{} is a sensor", current_node.0, node.id.0);
+            NodeStatus::Yes
+        } else if node.inputs.len() == 0 {
+            println!("{}:{} has no inputs", current_node.0, node.id.0);
+            NodeStatus::No
+        } else {
+            node.inputs.iter().fold(NodeStatus::Unknown, |acc, elem| {
+                let edge = &edges[elem.0];
+                println!("\tfor node {}:{}, processing input {}:{}", edge.target.0, node.id.0, edge.source.0, nodes[edge.source].id.0);
+
+                match visited.get(&edge.source) {
+                    Some(v) => {
+                        println!("\tfor node {}:{}, already visited index {}:{}", edge.target.0, node.id.0, edge.source.0, nodes[edge.source].id.0);
+                        match v.can_come_from_sensor {
+                            NodeStatus::Unknown => {
+                                println!("\tfor node {}:{}, index {}:{} can_come_from_sensor is uknown", edge.target.0, node.id.0, edge.source.0, nodes[edge.source].id.0);
+                                inputs.push((edge.source, edge.weight, NodeStatus::Unknown));
+                                acc.plus(&NodeStatus::Unknown)
+                            },
+                            NodeStatus::Yes => {
+                                inputs.push((edge.source, edge.weight, NodeStatus::Yes));
+                                acc.plus(&NodeStatus::Yes)
+                            },
+                            NodeStatus::No => {
+                                acc.plus(&NodeStatus::No)
+                            }
+                        }
+                    },
+                    None => {
+                        println!("\tfor node {}:{}, not yet visited index {}:{}, initialising with None", edge.target.0, node.id.0, edge.source.0, nodes[edge.source].id.0);
+                        let v = VisitedRecord2{can_come_from_sensor: NodeStatus::Unknown, depth: current_depth, inputs: Vec::new()};
+                        visited.insert(edge.source, v);
+                        let (b_opt, local_inputs) = can_come_from_sensor2(visited, nodes, edges, edge.source, current_depth + 1);
+                        let v_mut = visited.get_mut(&edge.source).unwrap();
+                        v_mut.can_come_from_sensor = b_opt;
+                        v_mut.inputs = local_inputs;
+                        match b_opt {
+                            NodeStatus::Unknown => {
+                                println!("\tfor node {}:{}, index {}:{} can_come_from_sensor is uknown", edge.target.0, node.id.0, edge.source.0, nodes[edge.source].id.0);
+                                inputs.push((edge.source, edge.weight, NodeStatus::Unknown));
+                                acc.plus(&NodeStatus::Unknown)
+                            },
+                            NodeStatus::Yes => {
+                                inputs.push((edge.source, edge.weight, NodeStatus::Yes));
+                                acc.plus(&NodeStatus::Yes)
+                            },
+                            NodeStatus::No => {
+                                acc.plus(&NodeStatus::No)
+                            }
+                        }
                     }
                 }
 
@@ -194,7 +305,7 @@ fn can_come_from_sensor(visited: &mut FxHashMap<NodeIndex, VisitedRecord>, nodes
 fn get_activation_order(nodes: &NodeMap, edges: &Vec<Edge>, n_sensor_nodes: usize, n_output_nodes: usize) -> Vec<(NodeIndex, Vec<(NodeIndex, f64)>)> {
     let mut visited: FxHashMap<NodeIndex,VisitedRecord> = FxHashMap::default();
     for i in n_sensor_nodes .. n_sensor_nodes + n_output_nodes {
-        let v = VisitedRecord{can_come_from_sensor: false, depth: 0, inputs: vec![]};
+        let v = VisitedRecord{can_come_from_sensor: None, depth: 0, inputs: vec![]};
         let node_id = NodeId(i);
         let node_index = nodes.get_index_of(&node_id).unwrap();
         visited.insert(node_index, v);
@@ -204,12 +315,71 @@ fn get_activation_order(nodes: &NodeMap, edges: &Vec<Edge>, n_sensor_nodes: usiz
         v_mut.inputs = local_inputs;
     }
 
+    //try again for all the nodes that didnt get set
+    // let unset_node_indices = visited.iter().filter(|(_, v)| v.can_come_from_sensor == None).map(|(k, _)| *k).collect_vec();
+
+    // for node_index in unset_node_indices {
+    //     let (b, local_inputs) = can_come_from_sensor(&mut visited, nodes, edges, node_index, 1);
+    //     let v_mut = visited.get_mut(&node_index).unwrap();
+    //     v_mut.can_come_from_sensor = b;
+    //     v_mut.inputs = local_inputs;
+    // }
+
+    println!("visited is initialised");
+    for (k, v) in visited.iter() {
+        println!("{}:{} can_come_from_sensor: {:?}, depth: {}, inputs: {:?}", k.0, nodes[*k].id.0, v.can_come_from_sensor, v.depth, v.inputs);
+    }
+    println!("end of data");
+
     visited.into_iter()
-    .filter(|(_, v)| v.can_come_from_sensor && v.inputs.len() > 0)
+    // .filter(|(_, v)| v.can_come_from_sensor == Some(true) && v.inputs.len() > 0)
     .sorted_by(|a, b| b.1.depth.cmp(&a.1.depth))
     .map(|(node_index, v)| (node_index, v.inputs))
     .collect()
 }    
+
+fn get_activation_order2(nodes: &NodeMap, edges: &Vec<Edge>, n_sensor_nodes: usize, n_output_nodes: usize) -> Vec<(NodeIndex, Vec<(NodeIndex, f64)>)> {
+    let mut visited: FxHashMap<NodeIndex,VisitedRecord2> = FxHashMap::default();
+    for i in n_sensor_nodes .. n_sensor_nodes + n_output_nodes {
+        let v = VisitedRecord2{can_come_from_sensor: NodeStatus::Unknown, depth: 0, inputs: vec![]};
+        let node_id = NodeId(i);
+        let node_index = nodes.get_index_of(&node_id).unwrap();
+        visited.insert(node_index, v);
+        let (b, local_inputs) = can_come_from_sensor2(&mut visited, nodes, edges, node_index, 1);
+        let v_mut = visited.get_mut(&node_index).unwrap();
+        v_mut.can_come_from_sensor = b;
+        v_mut.inputs = local_inputs;
+    }
+
+    println!("visited is initialised");
+    for (k, v) in visited.iter() {
+        println!("{}:{} can_come_from_sensor: {:?}, depth: {}, inputs: {:?}", k.0, nodes[*k].id.0, v.can_come_from_sensor, v.depth, v.inputs);
+    }
+    println!("end of data");
+
+    //try again for all the nodes that didnt get set
+    let unset_node_indices = visited.iter().filter(|(_, v)| v.can_come_from_sensor == NodeStatus::Unknown).map(|(k, _)| *k).collect_vec();
+
+    for node_index in unset_node_indices {
+        let (b, local_inputs) = can_come_from_sensor2(&mut visited, nodes, edges, node_index, 1);
+        let v_mut = visited.get_mut(&node_index).unwrap();
+        v_mut.can_come_from_sensor = b;
+        v_mut.inputs = local_inputs;
+    }
+
+    println!("visited is rerun");
+    for (k, v) in visited.iter() {
+        println!("{}:{} can_come_from_sensor: {:?}, depth: {}, inputs: {:?}", k.0, nodes[*k].id.0, v.can_come_from_sensor, v.depth, v.inputs);
+    }
+    println!("end of data");
+
+    visited.into_iter()
+    // .filter(|(_, v)| v.can_come_from_sensor == Some(true) && v.inputs.len() > 0)
+    .sorted_by(|a, b| b.1.depth.cmp(&a.1.depth))
+    .map(|(node_index, v)| (node_index, v.inputs.iter().map(|(i, w, _)| (*i, *w)).collect()))
+    .collect()
+}    
+
 
 impl Phenome {
     pub fn create_from_genome(genome: &Genome) -> Phenome {
@@ -233,7 +403,8 @@ impl Phenome {
             nodes[edge.target].inputs.push(EdgeIndex(i));
         }
         
-        let activation_order = get_activation_order(&nodes, &edges, genome.n_sensor_nodes, genome.n_output_nodes);
+        // let activation_order = get_activation_order2(&nodes, &edges, genome.n_sensor_nodes, genome.n_output_nodes);
+        let activation_order = vec![];
         let edges = Edges(edges);
 
         let inputs = (0..genome.n_sensor_nodes).map(|i| nodes.get_index_of(&NodeId(i)).unwrap()).collect_vec();
@@ -341,7 +512,14 @@ impl IndexMut<NodeIndex> for Phenome {
 }
 
 mod tests {
+    use std::collections::{HashSet, VecDeque};
+
+    use itertools::Itertools;
+    use rustc_hash::FxHashMap;
+
     use crate::neat::{genome::{Gene, GeneExt, Genome}, phenome::Phenome};
+
+    use super::{NodeIndex, NodeStatus, NodeType};
 
     fn genome_sample_dead_ends() -> Genome {
         Genome::create(vec![
@@ -357,6 +535,7 @@ mod tests {
             Gene::create(9, 7, 0.0, 8, true),
             Gene::create(7, 10, 0.0, 8, true),
             Gene::create(10, 9, 0.0, 8, true),
+            Gene::create(11, 4, 0.0, 8, true),
         ], 2, 2)
     }
 
@@ -367,13 +546,115 @@ mod tests {
         phenome.print_full_mermaid_graph();
 
         
-        println!("");
+        println!("activation order");
         for (k, v) in phenome.activation_order {
             print!("{} <- ", k.0);
             for (i, w) in &v {
                 print!("{}({:.4})", i.0, w);
             }
             println!("");
+        }
+    }
+
+    #[derive(Clone)]
+    struct VisitRecord {
+        can_come_from_sensor: NodeStatus,
+        depth: usize,
+    }
+
+    #[test]
+    fn test_dead_ends_2() {
+        let genome = genome_sample_dead_ends();
+        let phenome =  Phenome::create_from_genome(&genome);
+        phenome.print_full_mermaid_graph();
+
+        let mut visisted: FxHashMap<NodeIndex, NodeStatus> = FxHashMap::with_capacity_and_hasher(phenome.nodes.len(), Default::default());
+        //TODO change visited to a vector with all elements initialised to No, subsequent processing will set to Unknown and eventually Yes or No
+        // this will avoid hash lookups and allow for faster processing
+        let mut to_check: VecDeque<NodeIndex> = VecDeque::with_capacity(phenome.nodes.len());
+        for node_index in phenome.outputs.iter() {
+            visisted.insert(*node_index, NodeStatus::Unknown);
+            to_check.push_back(*node_index);
+        }
+
+        fn check_uniqueness(to_check: &VecDeque<NodeIndex>) {
+            let mut seen = HashSet::new();
+            let mut all_unique = true;
+
+            for item in to_check {
+                if !seen.insert(item) {
+                    all_unique = false;
+                    break;
+                }
+            }
+
+            if !all_unique {
+                println!("There are duplicate items in to_check.");
+            }
+        }
+
+        let mut loop_count = 0;
+        while let Some(node_index) = to_check.pop_front() {
+            check_uniqueness(&to_check);
+            println!("processing node {}:{} with status {:?}", node_index.0, phenome[node_index].id.0, visisted.get(&node_index));
+            println!("to check: {:?}", to_check);
+            let node = &phenome[node_index];
+            let mut to_add = vec![];
+            match visisted.get(&node_index) {
+                Some(status) => {
+                    if node.node_type == NodeType::Sensor {
+                        println!("{}:{} is a sensor", node_index.0, node.id.0);
+                        visisted.insert(node_index, NodeStatus::Yes);
+                    } else if node.inputs.len() == 0 {
+                        println!("{}:{} has no inputs", node_index.0, node.id.0);
+                        visisted.insert(node_index, NodeStatus::No);
+                    } else {
+                        let new_status = node.inputs.iter().fold(NodeStatus::Unknown, |acc_status, edge_index| {
+                            let edge = &phenome.edges[*edge_index];
+                            match visisted.get(&edge.source) {
+                                Some(input_status) => {
+                                    println!("{}:{} can come from {}:{} with status {:?}", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0, input_status);
+                                    acc_status.plus(input_status)
+                                },
+                                None => {
+                                    println!("{}:{} can come from {}:{} which has not yet been visited", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0);
+                                    to_check.push_back(edge.source);
+                                    to_add.push(edge.source);
+                                    acc_status
+                                }
+                            }
+                        });
+
+                        if status != &new_status {
+                            println!("{}:{} status changed from {:?} to {:?}", node_index.0, node.id.0, status, new_status);
+                            visisted.insert(node_index, new_status);
+                        } else if *status == NodeStatus::Unknown {
+                            println!("{}:{} status is still unknown", node_index.0, node.id.0);
+                            to_check.push_back(node_index);
+                        } else {
+                            println!("{}:{} status is still {:?} which is very unexpected", node_index.0, node.id.0, status);
+                        }
+                    }
+                },
+                None => {
+                    unreachable!();
+                }
+            }
+
+            to_add.iter().for_each(|i| {
+                visisted.insert(*i, NodeStatus::Unknown);
+            });
+
+            loop_count += 1;
+            if loop_count >= 300 {
+                break;
+            }
+        }
+
+        println!("loop count: {}", loop_count);
+       
+        for (k, v) in visisted.iter() {
+            println!("{}:{} can_come_from_sensor: {:?}", k.0, phenome[*k].id.0, v);
         }
     }
 }
