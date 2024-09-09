@@ -556,10 +556,25 @@ mod tests {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     struct VisitRecord {
-        can_come_from_sensor: NodeStatus,
-        depth: usize,
+        status: NodeStatus,
+        process_count: usize,
+        depth: usize
+    }
+
+    impl VisitRecord {
+        fn new(status: NodeStatus) -> VisitRecord {
+            VisitRecord{status, process_count: 0, depth: 0}
+        }
+
+        fn update_status(&self, new_status: NodeStatus) -> VisitRecord {
+            VisitRecord{status: new_status, process_count: self.process_count, depth: self.depth + 1}
+        }
+
+        fn inc_proc_count(self) -> VisitRecord {
+            VisitRecord{status: self.status, process_count: self.process_count + 1, depth: self.depth}
+        }
     }
 
     #[test]
@@ -568,12 +583,9 @@ mod tests {
         let phenome =  Phenome::create_from_genome(&genome);
         phenome.print_full_mermaid_graph();
 
-        let mut visisted: FxHashMap<NodeIndex, NodeStatus> = FxHashMap::with_capacity_and_hasher(phenome.nodes.len(), Default::default());
-        //TODO change visited to a vector with all elements initialised to No, subsequent processing will set to Unknown and eventually Yes or No
-        // this will avoid hash lookups and allow for faster processing
+        let mut visisted: Vec<Option<VisitRecord>> = (0..phenome.nodes.len()).map(|_| None).collect_vec();
         let mut to_check: VecDeque<NodeIndex> = VecDeque::with_capacity(phenome.nodes.len());
         for node_index in phenome.outputs.iter() {
-            visisted.insert(*node_index, NodeStatus::Unknown);
             to_check.push_back(*node_index);
         }
 
@@ -596,65 +608,83 @@ mod tests {
         let mut loop_count = 0;
         while let Some(node_index) = to_check.pop_front() {
             check_uniqueness(&to_check);
-            println!("processing node {}:{} with status {:?}", node_index.0, phenome[node_index].id.0, visisted.get(&node_index));
-            println!("to check: {:?}", to_check);
+            println!("processing node {}:{} with status {:?}", node_index.0, phenome[node_index].id.0, visisted[node_index.0]);
             let node = &phenome[node_index];
-            let mut to_add = vec![];
-            match visisted.get(&node_index) {
-                Some(status) => {
-                    if node.node_type == NodeType::Sensor {
-                        println!("{}:{} is a sensor", node_index.0, node.id.0);
-                        visisted.insert(node_index, NodeStatus::Yes);
-                    } else if node.inputs.len() == 0 {
-                        println!("{}:{} has no inputs", node_index.0, node.id.0);
-                        visisted.insert(node_index, NodeStatus::No);
-                    } else {
-                        let new_status = node.inputs.iter().fold(NodeStatus::Unknown, |acc_status, edge_index| {
-                            let edge = &phenome.edges[*edge_index];
-                            match visisted.get(&edge.source) {
-                                Some(input_status) => {
-                                    println!("{}:{} can come from {}:{} with status {:?}", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0, input_status);
-                                    acc_status.plus(input_status)
-                                },
-                                None => {
-                                    println!("{}:{} can come from {}:{} which has not yet been visited", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0);
-                                    to_check.push_back(edge.source);
-                                    to_add.push(edge.source);
-                                    acc_status
-                                }
-                            }
-                        });
+            
+            let vr_opt = visisted[node_index.0].clone();
 
-                        if status != &new_status {
-                            println!("{}:{} status changed from {:?} to {:?}", node_index.0, node.id.0, status, new_status);
-                            visisted.insert(node_index, new_status);
-                        } else if *status == NodeStatus::Unknown {
-                            println!("{}:{} status is still unknown", node_index.0, node.id.0);
-                            to_check.push_back(node_index);
-                        } else {
-                            println!("{}:{} status is still {:?} which is very unexpected", node_index.0, node.id.0, status);
+            if node.node_type == NodeType::Sensor {
+                println!("{}:{} is a sensor", node_index.0, node.id.0);
+                visisted[node_index.0] = Some(VisitRecord::new(NodeStatus::Yes));
+            } else if node.inputs.len() == 0 {
+                println!("{}:{} has no inputs", node_index.0, node.id.0);
+                visisted[node_index.0] = Some(VisitRecord::new(NodeStatus::No));
+            } else {
+                let new_status = node.inputs.iter().fold(NodeStatus::Unknown, |acc_status, edge_index| {
+                    let edge = &phenome.edges[*edge_index];
+                    match &visisted[edge.source.0] {
+                        Some(input_vr) => {
+                            println!("{}:{} can come from {}:{} with status {:?}", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0, input_vr);
+                            acc_status.plus(&input_vr.status)
+                        },
+                        None => {
+                            println!("{}:{} can come from {}:{} which has not yet been visited", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0);
+                            to_check.push_back(edge.source);
+                            visisted[edge.source.0] = Some(VisitRecord::new(NodeStatus::Unknown));
+                            acc_status
                         }
                     }
-                },
-                None => {
-                    unreachable!();
+                });
+
+                
+                match vr_opt {
+                    None => {
+                        visisted[node_index.0] = Some(VisitRecord::new(new_status));
+                        to_check.push_back(node_index);
+                        println!("{}:{} status set to {:?}", node_index.0, node.id.0, new_status);
+                    },
+                    Some(vr) if vr.status != new_status => {
+                        visisted[node_index.0] = Some(vr.update_status(new_status));
+                        println!("{}:{} status changed from {:?} to {:?}", node_index.0, node.id.0, vr.status, new_status);
+                    },
+                    Some(vr) if vr.status == NodeStatus::Unknown => {
+                        if vr.process_count > 2 {
+                            visisted[node_index.0] = Some(vr.update_status(NodeStatus::No));
+                            println!("{}:{} status changed from {:?} to {:?}", node_index.0, node.id.0, vr.status, NodeStatus::No);
+                        } else {
+                            visisted[node_index.0] = Some(vr.inc_proc_count());
+                            to_check.push_back(node_index);
+                            println!("{}:{} status is still unknown", node_index.0, node.id.0);
+                        }
+                    },
+                    Some(vr) => {
+                        println!("{}:{} status is still {:?} which is very unexpected", node_index.0, node.id.0, vr.status);
+                    }
                 }
             }
-
-            to_add.iter().for_each(|i| {
-                visisted.insert(*i, NodeStatus::Unknown);
-            });
 
             loop_count += 1;
             if loop_count >= 300 {
                 break;
             }
+            println!("to check: {:?}", to_check);
         }
 
         println!("loop count: {}", loop_count);
        
-        for (k, v) in visisted.iter() {
-            println!("{}:{} can_come_from_sensor: {:?}", k.0, phenome[*k].id.0, v);
+        for (k, v) in visisted.iter().enumerate() {
+            println!("{}:{} status: {:?}", k, phenome[NodeIndex(k)].id.0, v);
         }
+
+        println!("final results");
+        visisted.into_iter().enumerate().filter_map(|(k, v)| {
+            match v {
+                Some(vr) if vr.status == NodeStatus::Yes => Some((k, vr)),
+                _ => None
+            }
+        }).sorted_by(|a, b| a.1.depth.cmp(&b.1.depth)).for_each(|(k, v)| {
+            println!("{}:{} depth: {}", k, phenome[NodeIndex(k)].id.0, v.depth);
+        });
+        
     }
 }
