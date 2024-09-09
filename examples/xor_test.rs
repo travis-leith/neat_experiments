@@ -59,7 +59,7 @@ fn describe_population_fitness(population: &Population) {
 fn get_solution_organism(population: &Population) -> Option<&Organism> {
     for s in population.species.iter() {
         let champion = &population.organisms[s.champion];
-        if champion.fitness > 39900 {
+        if champion.fitness > 39990 {
             return Some(champion);
         }
     }
@@ -70,7 +70,7 @@ fn main() {
     let mut settings = Settings::standard(3, 1);
     settings.n_organisms = 1000;
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(12345);
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(1234);
     let mut population = Population::init(&mut rng, &settings);
 
     let mut evaluator = XorEvaluator;

@@ -174,13 +174,8 @@ mod tests {
         organism.phenome.print_mermaid_graph();
 
         let inputs = vec![-0.9, 0.6];
-        let mut outputs = organism.activate(&inputs);
-        assert_approx_eq!(outputs[0], 0.);
 
-        outputs = organism.activate(&inputs);
-        assert_approx_eq!(outputs[0], 0.0216);
-
-        outputs = organism.activate(&inputs);
+        let outputs = organism.activate(&inputs);
         assert_approx_eq!(outputs[0], 0.0168);
         
     }
