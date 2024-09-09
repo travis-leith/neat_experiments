@@ -554,29 +554,17 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Debug)]
     struct VisitRecord {
         status: NodeStatus,
         process_count: usize,
-        depth: usize,
-        yes_order: usize
+        yes_order: usize,
+        visited: bool
     }
 
     impl VisitRecord {
         fn new(status: NodeStatus) -> VisitRecord {
-            VisitRecord{status, process_count: 0, depth: 0, yes_order: 0}
-        }
-
-        fn update_status(&self, new_status: NodeStatus) -> VisitRecord {
-            VisitRecord{status: new_status, process_count: self.process_count, depth: self.depth + 1, yes_order: self.yes_order}
-        }
-
-        fn inc_proc_count(self) -> VisitRecord {
-            VisitRecord{status: self.status, process_count: self.process_count + 1, depth: self.depth + 1, yes_order: self.yes_order}
-        }
-
-        fn inc_depth(&self) -> VisitRecord {
-            VisitRecord{status: self.status, process_count: self.process_count, depth: self.depth + 1, yes_order: self.yes_order}
+            VisitRecord{status, process_count: 0, yes_order: 0, visited: false}
         }
     }
 
@@ -590,82 +578,60 @@ mod tests {
         let mut to_check: VecDeque<NodeIndex> = VecDeque::with_capacity(phenome.nodes.len());
         for node_index in phenome.outputs.iter() {
             to_check.push_back(*node_index);
-            visisted[node_index.0] = visisted[node_index.0].inc_depth();
-        }
-
-        fn check_uniqueness(to_check: &VecDeque<NodeIndex>) {
-            let mut seen = HashSet::new();
-            let mut all_unique = true;
-
-            for item in to_check {
-                if !seen.insert(item) {
-                    all_unique = false;
-                    break;
-                }
-            }
-
-            if !all_unique {
-                println!("There are duplicate items in to_check.");
-            }
+            visisted[node_index.0].visited = true;
         }
 
         let mut loop_count = 0;
         let mut yes_count = 0;
         while let Some(node_index) = to_check.pop_front() {
-            // check_uniqueness(&to_check);
-            println!("processing node {}:{} with status {:?}", node_index.0, phenome[node_index].id.0, visisted[node_index.0]);
+            // println!("processing node {}:{} with status {:?}", node_index.0, phenome[node_index].id.0, visisted[node_index.0]);
             let node = &phenome[node_index];
-            
-            let vr = visisted[node_index.0].clone();
 
             if node.node_type == NodeType::Sensor {
-                println!("{}:{} is a sensor", node_index.0, node.id.0);
+                // println!("{}:{} is a sensor", node_index.0, node.id.0);
                 yes_count += 1;
-                visisted[node_index.0] = vr.update_status(NodeStatus::Yes);
+                visisted[node_index.0].status = NodeStatus::Yes;
                 visisted[node_index.0].yes_order = yes_count;
             } else if node.inputs.len() == 0 {
-                println!("{}:{} has no inputs", node_index.0, node.id.0);
-                visisted[node_index.0] = vr.update_status(NodeStatus::No);
+                // println!("{}:{} has no inputs", node_index.0, node.id.0);
+                visisted[node_index.0].status = NodeStatus::No;
             } else {
                 let new_status = node.inputs.iter().fold(NodeStatus::Unknown, |acc_status, edge_index| {
                     let edge = &phenome.edges[*edge_index];
-                    let input_vr = visisted[edge.source.0].clone();
-                    if input_vr.depth == 0 {
-                        println!("{}:{} has not yet been visited", edge.source.0, phenome[edge.source].id.0);
+                    if !visisted[edge.source.0].visited {
+                        // println!("{}:{} has not yet been visited", edge.source.0, phenome[edge.source].id.0);
                         to_check.push_back(edge.source);
-                        visisted[edge.source.0] = input_vr.inc_depth();
-                        check_uniqueness(&to_check);
+                        visisted[edge.source.0].visited = true;
                     }
 
-                    println!("{}:{} can come from {}:{} with status {:?}", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0, input_vr);
-                    acc_status.plus(&input_vr.status)
+                    // println!("{}:{} can come from {}:{} with status {:?}", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0, visisted[edge.source.0]);
+                    acc_status.plus(&visisted[edge.source.0].status)
                 });
 
-                if vr.status != new_status {
-                    visisted[node_index.0] = vr.update_status(new_status);
-                    println!("{}:{} status changed from {:?} to {:?}", node_index.0, node.id.0, vr.status, new_status);
+                if visisted[node_index.0].status != new_status {
+                    visisted[node_index.0].status = new_status;
+                    // println!("{}:{} status changed from {:?} to {:?}", node_index.0, node.id.0, visisted[node_index.0].status, new_status);
                     if new_status == NodeStatus::Yes {
                         yes_count += 1;
                         visisted[node_index.0].yes_order = yes_count;
                     }
-                } else if vr.status == NodeStatus::Unknown {
-                    if vr.process_count > 2 {
-                        visisted[node_index.0] = vr.update_status(NodeStatus::No);
-                        println!("{}:{} status changed from {:?} to No", node_index.0, node.id.0, vr.status);
+                } else if visisted[node_index.0].status == NodeStatus::Unknown {
+                    if visisted[node_index.0].process_count > 2 {
+                        visisted[node_index.0].status = NodeStatus::No;
+                        // println!("{}:{} status changed from {:?} to No", node_index.0, node.id.0, visisted[node_index.0].status);
                     } else {
-                        visisted[node_index.0] = vr.inc_proc_count();
+                        visisted[node_index.0].process_count += 1;
                         to_check.push_back(node_index);
-                        check_uniqueness(&to_check);
-                        println!("{}:{} status is still unknown", node_index.0, node.id.0);
+                        // println!("{}:{} status is still unknown", node_index.0, node.id.0);
                     }
                 } else {
-                    println!("{}:{} status is still {:?} which is very unexpected", node_index.0, node.id.0, vr.status);
+                    // println!("{}:{} status is still {:?} which is very unexpected", node_index.0, node.id.0, visisted[node_index.0].status);
                 }
                 
             }
 
             loop_count += 1;
-            if loop_count >= 300 {
+            if loop_count >= 16383 {
                 break;
             }
             println!("to check: {:?}", to_check);
