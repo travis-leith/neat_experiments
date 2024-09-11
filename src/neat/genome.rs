@@ -63,7 +63,7 @@ impl GeneExt for Gene {
 
 #[derive(Clone)]
 pub struct Genome{
-    data: FxIndexMap<GeneKey, GeneValue>,
+    pub data: FxIndexMap<GeneKey, GeneValue>,
     next_node_id: NodeId,
     pub n_sensor_nodes: usize,
     pub n_output_nodes: usize,

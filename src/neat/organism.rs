@@ -1,7 +1,9 @@
 use std::ops::{Index, IndexMut};
+use itertools::Itertools;
 use rand::{seq::SliceRandom, RngCore};
+use rustc_hash::FxHashSet;
 use crate::neat::genome::Genome;
-use super::phenome::Phenome;
+use super::{genome::GeneKey, phenome::Phenome};
 
 #[derive(Clone, Copy)]
 pub struct OrganismIndex(pub usize);
@@ -38,6 +40,21 @@ impl Organism {
 
     pub fn clear_values(&mut self) {
         self.phenome.clear_values();
+    }
+
+    pub fn trim_genome(&mut self) {
+        let distinct_gene_keys : FxHashSet<GeneKey> = 
+            self.phenome.activation_order.iter().flat_map(|(out_node_index, inputs)| {
+                let out_node_id = self.phenome.nodes[*out_node_index].id;
+            inputs.iter().map(|(in_node_index, _)| {
+                let in_node_id = self.phenome.nodes[*in_node_index].id;
+                GeneKey{in_node_id, out_node_id}
+            }).collect_vec()
+        }).collect();
+
+        self.genome.data.retain(|gene_key, _| distinct_gene_keys.contains(&gene_key));
+        self.phenome = Phenome::create_from_genome(&self.genome);
+
     }
 }
 

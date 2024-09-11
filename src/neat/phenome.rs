@@ -431,4 +431,6 @@ mod tests {
             println!("");
         }
     }
+    //TODO demonstrate that adding nodes does not change the activation value
+    
 }

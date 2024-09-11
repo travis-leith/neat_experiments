@@ -5,6 +5,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 pub struct Species {
+    pub id: usize,
     pub members: Vec<OrganismIndex>,
     pub representative: Genome,
     pub champion: OrganismIndex,
@@ -16,6 +17,7 @@ pub struct Population {
     pub organisms: Organisms,
     species_distance_threshold: f64,
     pub generation: usize,
+    pub next_species_id: usize
 }
 
 pub trait SinglePlayerArena {
@@ -48,8 +50,10 @@ impl Population {
                     members: vec![organism_index],
                     representative: organism.genome.clone(),
                     champion: organism_index,
-                    avg_fitness: 0.0
+                    avg_fitness: 0.0,
+                    id: self.next_species_id
                 };
+                self.next_species_id += 1;
                 self.species.push(new_species);
             }
         }
@@ -94,7 +98,8 @@ impl Population {
             species: Vec::new(),
             organisms: Organisms::new(organisms),
             species_distance_threshold: 0.3,
-            generation: 0
+            generation: 0,
+            next_species_id: 0
         };
 
         res.speciate(rng, settings);
@@ -166,7 +171,7 @@ impl Population {
 
     pub fn evaluate_two_player<A: TurnBasedArena + Send + Sync>(&mut self, evaluator: &A) {
         use rayon::prelude::*;
-        self.organisms.par_chunks_mut(100).for_each(|chunk| {
+        self.organisms.par_chunks_mut(200).for_each(|chunk| {
             for i in 0 .. chunk.len() {
                 let (left, others) = chunk.split_at_mut(i);
                 let (middle, right) = others.split_at_mut(1);
@@ -310,6 +315,15 @@ impl Population {
 
         self.organisms = Organisms::new(new_population);
         self.speciate(rng, settings)
+    }
+
+    pub fn trim_genomes(&mut self) {
+        for s in self.species.iter_mut() {
+            for &org_index in &s.members {
+                let org = &mut self.organisms[org_index];
+                org.trim_genome();
+            }
+        }
     }
 
 }
