@@ -198,15 +198,18 @@ fn test_tictactoe() {
     settings.mutate_add_node_rate = 0.05;
 
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(123);
+    
     let mut population = Population::init(&mut rng, &settings);
+    
 
     let mut evaluator = TicTacToeEvaluator;
 
-    describe_population_demographics(&population);
-    population.evaluate_all(&mut evaluator);        
-    describe_population_fitness(&population);
+    // describe_population_demographics(&population);
+    println!("evaluating initial population");
+    population.evaluate_two_player(&mut evaluator);        
+    // describe_population_fitness(&population);
 
-
+    println!("starting evolution");
     for _ in 0..10000 {
         population.next_generation(&mut rng, &settings);
         if population.generation % 20 == 0 {
@@ -219,9 +222,9 @@ fn test_tictactoe() {
             describe_population_fitness(&population);
         }
 
-        if population.generation % 1000 == 0 {
-            population.trim_genomes();
-        }
+        // if population.generation % 1000 == 0 {
+        //     population.trim_genomes();
+        // }
         
     }
 

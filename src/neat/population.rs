@@ -73,7 +73,7 @@ impl Population {
 
             let n_non_empty_species = self.species.iter().filter(|s| !s.members.is_empty()).count();
             if n_non_empty_species < settings.n_species_min {
-                self.species_distance_threshold *= 0.9;
+                self.species_distance_threshold *= 0.91;
             } else if n_non_empty_species > settings.n_species_max {
                 self.species_distance_threshold *= 1.1;
             } else {
@@ -89,6 +89,7 @@ impl Population {
     pub fn init<R: RngCore>(rng: &mut R, settings: &Settings) -> Population {
         let mut organisms = Vec::new();
 
+        println!("initializing population");
         for _ in 0..settings.n_organisms {
             let organism = Organism::init(rng, settings.n_sensor_nodes, settings.n_output_nodes);
             organisms.push(organism);
@@ -102,7 +103,9 @@ impl Population {
             next_species_id: 0
         };
 
+        println!("speciating");
         res.speciate(rng, settings);
+        println!("population initialized");
         res
     }
 
