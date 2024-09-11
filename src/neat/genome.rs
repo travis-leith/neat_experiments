@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use rand::{RngCore, Rng};
 use rand_distr::{Distribution, Normal, Uniform};
 use indexmap::IndexMap;
@@ -7,12 +8,12 @@ type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 
 use crate::neat::vector::{AllignedTuplePair, allign_indexmap_map, allign_indexmap_iter};
 
-use super::{common::Settings, innovation::{InnovationContext, InnovationNumber}};
+use super::common::Settings;
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct GeneIndex(pub usize);
 
-#[derive(PartialEq, PartialOrd, Clone, Copy, Eq, Hash)]
+#[derive(PartialEq, PartialOrd, Ord, Clone, Copy, Eq, Hash)]
 pub struct NodeId(pub usize);
 
 impl NodeId {
@@ -21,7 +22,7 @@ impl NodeId {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone)]
+#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone)]
 pub struct GeneKey {
     pub in_node_id: NodeId,
     pub out_node_id: NodeId
@@ -30,15 +31,13 @@ pub struct GeneKey {
 #[derive(Clone)]
 pub struct GeneValue {
     pub weight: f64,
-    pub innovation: InnovationNumber,
     pub enabled: bool
 }
 
 impl GeneValue {
-    pub fn create(weight: f64, innovation: usize, enabled: bool) -> GeneValue {
+    pub fn create(weight: f64, enabled: bool) -> GeneValue {
         GeneValue {
             weight,
-            innovation: InnovationNumber(innovation),
             enabled,
         }
     }
@@ -47,17 +46,17 @@ impl GeneValue {
 pub type Gene = (GeneKey, GeneValue);
 
 pub trait GeneExt {
-    fn create(in_node_id: usize, out_node_id: usize, weight: f64, innovation: usize, enabled: bool) -> Self;
+    fn create(in_node_id: usize, out_node_id: usize, weight: f64, enabled: bool) -> Self;
 }
 
 impl GeneExt for Gene {
-    fn create(in_node_id: usize, out_node_id: usize, weight: f64, innovation: usize, enabled: bool) -> Gene {
+    fn create(in_node_id: usize, out_node_id: usize, weight: f64, enabled: bool) -> Gene {
         (
             GeneKey {
                 in_node_id: NodeId(in_node_id),
                 out_node_id: NodeId(out_node_id),
             },
-            GeneValue::create(weight, innovation, enabled),
+            GeneValue::create(weight, enabled),
         )
     }
 }
@@ -65,7 +64,7 @@ impl GeneExt for Gene {
 #[derive(Clone)]
 pub struct Genome{
     data: FxIndexMap<GeneKey, GeneValue>,
-    pub next_node_id: NodeId,
+    next_node_id: NodeId,
     pub n_sensor_nodes: usize,
     pub n_output_nodes: usize,
 }
@@ -85,7 +84,7 @@ impl Genome {
                 acc
             }
         });
-        let data = genes.into_iter().collect();
+        let data = genes.into_iter().sorted_by_key(|x|x.0.clone()).collect();
         let next_node_id = max_node_id.inc();
         Genome{data, next_node_id, n_sensor_nodes, n_output_nodes}
     }
@@ -100,8 +99,7 @@ impl Genome {
             let out_node_id = out_node_ind + n_sensor_nodes;
             for in_node_ind in 0..n_sensor_nodes {
                 let in_node_id = in_node_ind;
-                let innovation_number = out_node_ind * n_sensor_nodes + in_node_ind;
-                let (gene_key, gene_val) = Gene::create(in_node_id, out_node_id, between.sample(rng), innovation_number, true);
+                let (gene_key, gene_val) = Gene::create(in_node_id, out_node_id, between.sample(rng), true);
                 data.insert(gene_key, gene_val);
             }
         }
@@ -123,7 +121,7 @@ impl Genome {
         self.data.get_index_mut(index.0).unwrap()
     }
 
-    pub fn add_connection(&mut self, innovation_context: &mut InnovationContext, in_node_id: NodeId, out_node_id: NodeId, weight: f64) {
+    pub fn add_connection(&mut self, in_node_id: NodeId, out_node_id: NodeId, weight: f64) {
         debug_assert!(in_node_id != out_node_id, "Tried to add a connection where input is the same node as output");
         debug_assert!(in_node_id < self.next_node_id, "Tried to add a connection with an input node that does not exist");
         debug_assert!(out_node_id < self.next_node_id, "Tried to add a connection with an output node that does not exist");
@@ -134,13 +132,12 @@ impl Genome {
             out_node_id
         };
 
-        let innov_number = innovation_context.get_innovation_number(gene_key.clone());
-        let gene_value = GeneValue::create(weight, innov_number.0, true);
+        let gene_value = GeneValue::create(weight, true);
         let insertion_result = self.data.insert(gene_key, gene_value);
         debug_assert!(insertion_result.is_none(), "Tried to add a connection that already exists");
     }
 
-    pub fn add_node(&mut self, innovation_context: &mut InnovationContext, existing_conn_index: GeneIndex) {
+    pub fn add_node(&mut self, existing_conn_index: GeneIndex) {
         let (gene_key, gene_val) = {
             let (gene_key, gene_val) = self.get_index_mut(existing_conn_index);
             let cloned_pair = (gene_key.clone(), gene_val.clone());
@@ -151,8 +148,8 @@ impl Genome {
         if gene_val.enabled {
             let new_node_id = self.next_node_id;
             self.next_node_id = self.next_node_id.inc();
-            self.add_connection(innovation_context, gene_key.in_node_id, new_node_id, 1.);
-            self.add_connection(innovation_context, new_node_id, gene_key.out_node_id, gene_val.weight);
+            self.add_connection(gene_key.in_node_id, new_node_id, 1.);
+            self.add_connection(new_node_id, gene_key.out_node_id, gene_val.weight);
         }    
     }
 
@@ -220,7 +217,7 @@ impl Genome {
             }
         };
 
-        let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
+        let get_id = |gene: (&GeneKey, &GeneValue)| gene.0.clone();
         allign_indexmap_iter(&self.data, &other.data, &get_id, &mut increment_counters);
 
         let n = std::cmp::max(n1, n2) as f64;
@@ -230,15 +227,15 @@ impl Genome {
         excess_term + disjoint_term + weight_term
     }
 
-    pub fn mutate<R: RngCore>(&mut self, rng: &mut R, innovation_context: &mut InnovationContext, settings: &Settings) {
+    pub fn mutate<R: RngCore>(&mut self, rng: &mut R, settings: &Settings) {
         let between = Uniform::from(0.0..1.0);
-        self.mutate_add_connection(rng, &between, innovation_context, settings);
-        self.mutate_add_node(rng, &between, innovation_context, settings);
+        self.mutate_add_connection(rng, &between, settings);
+        self.mutate_add_node(rng, &between, settings);
         self.mutate_weight(rng, &between, settings);
-        //TODO: enable/disable genes
+        self.mutate_toggle_connection(rng, &between, settings);
     }
 
-    fn mutate_add_connection<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, innovation_context: &mut InnovationContext, settings: &Settings) {
+    fn mutate_add_connection<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, settings: &Settings) {
         let r = between.sample(rng);
         if r < settings.mutate_add_connection_rate {
             let in_node_id = NodeId(rng.gen_range(0..self.next_node_id.0));
@@ -246,17 +243,17 @@ impl Genome {
             if in_node_id != out_node_id {
                 let gene_key = GeneKey{in_node_id, out_node_id};
                 if !self.data.contains_key(&gene_key) {
-                    self.add_connection(innovation_context, in_node_id, out_node_id, rng.gen_range(-1.0..1.0));
+                    self.add_connection(in_node_id, out_node_id, rng.gen_range(-1.0..1.0));
                 }
             }
         }
     }
 
-    fn mutate_add_node<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, innovation_context: &mut InnovationContext, settings: &Settings) {
+    fn mutate_add_node<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, settings: &Settings) {
         let r = between.sample(rng);
         if r < settings.mutate_add_node_rate {
             let gene_index = GeneIndex(rng.gen_range(0..self.len()));
-            self.add_node(innovation_context, gene_index);
+            self.add_node(gene_index);
         }
     }
 
@@ -268,6 +265,15 @@ impl Genome {
                 //generate guassian random number
                 gene_value.weight += normal.sample(rng);
             }
+        }
+    }
+
+    fn mutate_toggle_connection<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, settings: &Settings) {
+        let r = between.sample(rng);
+        if r < settings.mutate_toggle_connection_rate {
+            let gene_index = GeneIndex(rng.gen_range(0..self.len()));
+            let (_, gene_value) = self.get_index_mut(gene_index);
+            gene_value.enabled = !gene_value.enabled;
         }
     }
 }
@@ -310,7 +316,7 @@ pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: usize, 
         }
     };
 
-    let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
+    let get_id = |gene: (&GeneKey, &GeneValue)| gene.0.clone();
     let new_genome_data = allign_indexmap_map(&genome_1.data, &genome_2.data, &get_id, &mut choose_gene);
     let new_next_node_id = NodeId(std::cmp::max(genome_1.next_node_id.0, genome_2.next_node_id.0));
     Genome{data: new_genome_data, next_node_id: new_next_node_id, n_sensor_nodes:genome_1.n_sensor_nodes, n_output_nodes:genome_1.n_output_nodes}
@@ -319,18 +325,14 @@ pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: usize, 
 
 #[cfg(test)]
 mod tests {
-    // use fxhash::FxHashSet;
-    // use rand::SeedableRng;
-    // use rand_xoshiro::Xoshiro256PlusPlus;
-
     use super::*;
     fn genome_sample_1() -> Genome{
         Genome::create(vec![
-            Gene::create(0, 3, 0.0, 0, true),
-            Gene::create(1, 3, 0.0, 1, true),
-            Gene::create(1, 4, 0.0, 2, true),
-            Gene::create(2, 4, 0.0, 3, true),
-            Gene::create(3, 4, 0.0, 4, true),
+            Gene::create(0, 3, 0.0, true),
+            Gene::create(1, 3, 0.0, true),
+            Gene::create(1, 4, 0.0, true),
+            Gene::create(2, 4, 0.0, true),
+            Gene::create(3, 4, 0.0, true),
         ], 2, 2)
     } 
     
@@ -351,16 +353,14 @@ mod tests {
     #[test]
     fn test_genome_add_connection() {
         let mut genome = genome_sample_1();
-        let mut innovation_context = InnovationContext::init(2, 2);
-        genome.add_connection(&mut innovation_context, NodeId(0), NodeId(4), 0.0);
+        genome.add_connection(NodeId(0), NodeId(4), 0.0);
         assert_eq!(genome.len(), 6);
     }
 
     #[test]
     fn test_genome_add_node() {
         let mut genome = genome_sample_1();
-        let mut innovation_context = InnovationContext::init(2, 2);
-        genome.add_node(&mut innovation_context, GeneIndex(0));
+        genome.add_node(GeneIndex(0));
         assert_eq!(genome.len(), 7);
     }
 

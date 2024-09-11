@@ -102,29 +102,29 @@ impl<'a> IntoParallelRefMutIterator<'a> for Organisms {
 
 #[cfg(test)]
 mod tests {
-    use crate::neat::{genome::{Gene, GeneExt, GeneIndex, Genome, NodeId}, organism::Organism};
+    use crate::neat::{genome::{Gene, GeneExt, Genome, NodeId}, organism::Organism};
     use assert_approx_eq::assert_approx_eq;
 
     fn genome_sample_feed_forward_1() -> Genome{
         Genome::create(vec![
-            Gene::create(0, 4, -0.1, 0, true),
-            Gene::create(4, 3, 0.6, 1, true),
-            Gene::create(1, 5, -0.8, 2, true),
-            Gene::create(5, 3, -0.9, 3, true),
-            Gene::create(0, 5, 0.6, 4, true),
-            Gene::create(5, 2, 0.4, 5, true),
+            Gene::create(0, 4, -0.1, true),
+            Gene::create(4, 3, 0.6, true),
+            Gene::create(1, 5, -0.8, true),
+            Gene::create(5, 3, -0.9, true),
+            Gene::create(0, 5, 0.6, true),
+            Gene::create(5, 2, 0.4, true),
         ], 2, 2)
     }
 
     fn genome_sample_recurrent_1() -> Genome{
         Genome::create(vec![
-            Gene::create(3, 2, 0.9, 0, true),
-            Gene::create(1, 4, -0.8, 1, true),
-            Gene::create(4, 3, 0.1, 2, true),
-            Gene::create(5, 2, -0.4, 3, true),
-            Gene::create(0, 4, -0.8, 4, true),
-            Gene::create(3, 5, 0.5, 5, true),
-            Gene::create(5, 4, -0.1, 6, true),
+            Gene::create(3, 2, 0.9, true),
+            Gene::create(1, 4, -0.8, true),
+            Gene::create(4, 3, 0.1, true),
+            Gene::create(5, 2, -0.4, true),
+            Gene::create(0, 4, -0.8, true),
+            Gene::create(3, 5, 0.5, true),
+            Gene::create(5, 4, -0.1, true),
         ], 2, 1)
     }
 
@@ -143,7 +143,6 @@ mod tests {
         let n_output_nodes = 10;
         let n_total = n_sensor_nodes + n_output_nodes;
         let network = Organism::init(&mut rng, n_sensor_nodes, n_output_nodes);
-        assert_eq!(network.genome.get_index(GeneIndex(89)).1.innovation.0, 89);
         assert_eq!(network.genome.len(), 90);
         assert_eq!(network.phenome.nodes.len(), n_total);
         assert_eq!(network.genome.n_output_nodes, n_output_nodes);

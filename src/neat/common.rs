@@ -8,9 +8,11 @@ pub struct Settings {
     pub mutate_add_connection_rate: f64,
     pub mutate_add_node_rate: f64,
     pub mutate_weight_rate: f64,
+    pub mutate_toggle_connection_rate: f64,
     pub mutate_weight_scale: f64,
     pub n_species_min: usize,
     pub n_species_max: usize,
+    
     //TODO add more settings
     //inter_species_mating_rate
     //intra_species_mating_rate
@@ -29,6 +31,7 @@ impl Settings {
             mutate_weight_rate: 0.1,
             mutate_weight_scale: 0.1,
             mutate_add_connection_rate: 0.03,
+            mutate_toggle_connection_rate: 0.01,
             mutate_add_node_rate: 0.01,
             n_species_min: 20,
             n_species_max: 40,

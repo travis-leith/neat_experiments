@@ -202,7 +202,7 @@ fn test_tictactoe() {
     describe_population_fitness(&population);
 
 
-    for _ in 0..100000 {
+    for _ in 0..10000 {
         population.next_generation(&mut rng, &settings);
         if population.generation % 20 == 0 {
             println!("generation: {:?}", population.generation);

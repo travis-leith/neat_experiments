@@ -405,16 +405,16 @@ mod tests {
         use crate::neat::{genome::{Gene, GeneExt, Genome}, phenome::Phenome};
         let genome = 
             Genome::create(vec![
-                Gene::create(0, 4, 0.0, 0, true),
-                Gene::create(4, 2, 0.0, 1, true),
-                Gene::create(7, 6, 0.0, 2, true),
-                Gene::create(4, 6, 0.0, 3, true),
-                Gene::create(4, 8, 0.0, 4, true),
-                Gene::create(6, 5, 0.0, 5, true),
-                Gene::create(5, 4, 0.0, 6, true),
-                Gene::create(1, 5, 0.0, 7, true),
-                Gene::create(5, 3, 0.0, 8, true),
-                Gene::create(9, 7, 0.0, 8, true),
+                Gene::create(0, 4, 0.0, true),
+                Gene::create(4, 2, 0.0, true),
+                Gene::create(7, 6, 0.0, true),
+                Gene::create(4, 6, 0.0, true),
+                Gene::create(4, 8, 0.0, true),
+                Gene::create(6, 5, 0.0, true),
+                Gene::create(5, 4, 0.0, true),
+                Gene::create(1, 5, 0.0, true),
+                Gene::create(5, 3, 0.0, true),
+                Gene::create(9, 7, 0.0, true),
                 
             ], 2, 2);
 

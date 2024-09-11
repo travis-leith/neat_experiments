@@ -29,7 +29,7 @@ impl SinglePlayerArena for XorEvaluator {
 fn check_evaluation(organism: &mut Organism) {
     let inputs = vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 1.0], vec![1.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]];
     for i in 0..inputs.len() {
-        // organism.clear_values();
+        organism.clear_values();
         let output = organism.activate(&inputs[i]);
         println!("in: {:?}; out: {:?}", inputs[i], output);
     }
@@ -70,7 +70,7 @@ fn main() {
     let mut settings = Settings::standard(3, 1);
     settings.n_organisms = 1000;
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(1234);
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
     let mut population = Population::init(&mut rng, &settings);
 
     let mut evaluator = XorEvaluator;
@@ -79,8 +79,8 @@ fn main() {
     population.evaluate(&mut evaluator, true);        
     describe_population_fitness(&population);
 
-    for _ in 0..500 {
-        population.next_generation(&mut rng, &settings);
+    for _ in 0..5000 {
+        population.next_generation_par(&mut rng, &settings);
         describe_population_demographics(&population);
         // population.evaluate(&mut evaluator);
         population.evaluate_single_player(&mut evaluator, true);
