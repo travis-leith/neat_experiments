@@ -4,7 +4,6 @@ use std::ops::IndexMut;
 
 use indexmap::IndexMap;
 use itertools::Itertools;
-use rustc_hash::FxHashMap;
 
 use super::genome::Genome;
 use super::genome::NodeId;
@@ -88,7 +87,7 @@ impl NodeMap {
     }
 
     fn with_capacity(capacity: usize) -> NodeMap {
-        NodeMap(IndexMap::with_capacity_and_hasher(capacity, rustc_hash::FxBuildHasher::default()))
+        NodeMap(IndexMap::with_capacity_and_hasher(capacity, rustc_hash::FxBuildHasher))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Node> {
@@ -100,7 +99,7 @@ impl NodeMap {
     }
 
     pub fn get_index_of(&self, node_id: &NodeId) -> Option<NodeIndex> {
-        self.0.get_index_of(node_id).map(|i| NodeIndex(i))
+        self.0.get_index_of(node_id).map(NodeIndex)
     }
 }
 
@@ -175,7 +174,7 @@ impl VisitRecord {
     }
 }
 
-fn get_activation_order(nodes: &NodeMap, edges: &Vec<Edge>, outputs: &Vec<NodeIndex>) -> Vec<(NodeIndex, Vec<(NodeIndex, f64)>)> {
+fn get_activation_order(nodes: &NodeMap, edges: &[Edge], outputs: &[NodeIndex]) -> Vec<(NodeIndex, Vec<(NodeIndex, f64)>)> {
     let mut visisted: Vec<VisitRecord> = (0..nodes.len()).map(|_|VisitRecord::new(NodeStatus::Unknown)).collect_vec();
     let mut to_check: VecDeque<NodeIndex> = VecDeque::with_capacity(nodes.len());
     for node_index in outputs.iter() {
@@ -194,7 +193,7 @@ fn get_activation_order(nodes: &NodeMap, edges: &Vec<Edge>, outputs: &Vec<NodeIn
             yes_count += 1;
             visisted[node_index.0].status = NodeStatus::Yes;
             visisted[node_index.0].yes_order = yes_count;
-        } else if node.inputs.len() == 0 {
+        } else if node.inputs.is_empty() {
             // println!("{}:{} has no inputs", node_index.0, node.id.0);
             visisted[node_index.0].status = NodeStatus::No;
         } else {
@@ -298,7 +297,7 @@ impl Phenome {
         Phenome{nodes, edges, activation_order, inputs, outputs}
     }
     
-    pub fn activate(&mut self, sensor_values: &Vec<f64>) {
+    pub fn activate(&mut self, sensor_values: &[f64]) {
         fn relu(x: f64) -> f64 {
             if x > 0.0 {
                 x
@@ -338,22 +337,25 @@ impl Phenome {
 
     pub fn print_mermaid_graph(&self) {
         println!("graph TD");
-        for (i, node) in self.nodes.iter().enumerate() {
-            let node_id = node.id;
+        //print the sensor nodes
+        for node_index in self.inputs.iter() {
+            let node = &self.nodes[*node_index];
+            println!("{}[{}:{}/S]", node_index.0, node_index.0, node.id.0);
+        }
+
+        //print the rest
+        for node_index in self.activation_order.iter().map(|x|x.0) {
+            let node = &self.nodes[node_index];
             let node_type = match node.node_type {
                 NodeType::Sensor => "S",
                 NodeType::Hidden => "H",
                 NodeType::Output => "O",
             };
-            println!("{}[{}:{}/{}]", i, i, node_id.0, node_type);
+            println!("{}[{}:{}/{}]", node_index.0, node_index.0, node.id.0, node_type);
         }
 
         for &(node_index, ref inputs) in &self.activation_order {
-            // let node = &self.nodes[node_index];
-            
-            // let incoming_edges = self.phenome.edges_directed(node_index, Direction::Incoming);
             for (input_index, weight) in inputs {
-                // let input_node = &self.nodes[*input_index];
                 println!("{} -->|{:.4}|{}", input_index.0, weight, node_index.0);
             }
         }
@@ -398,29 +400,24 @@ impl IndexMut<NodeIndex> for Phenome {
 }
 
 mod tests {
-
-
-    use crate::neat::{genome::{Gene, GeneExt, Genome}, phenome::Phenome};
-
-    fn genome_sample_dead_ends() -> Genome {
-        Genome::create(vec![
-            Gene::create(0, 4, 0.0, 0, true),
-            Gene::create(4, 2, 0.0, 1, true),
-            Gene::create(7, 6, 0.0, 2, true),
-            Gene::create(4, 6, 0.0, 3, true),
-            Gene::create(4, 8, 0.0, 4, true),
-            Gene::create(6, 5, 0.0, 5, true),
-            Gene::create(5, 4, 0.0, 6, true),
-            Gene::create(1, 5, 0.0, 7, true),
-            Gene::create(5, 3, 0.0, 8, true),
-            Gene::create(9, 7, 0.0, 8, true),
-            
-        ], 2, 2)
-    }
-
     #[test]
     fn test_dead_ends() {
-        let genome = genome_sample_dead_ends();
+        use crate::neat::{genome::{Gene, GeneExt, Genome}, phenome::Phenome};
+        let genome = 
+            Genome::create(vec![
+                Gene::create(0, 4, 0.0, 0, true),
+                Gene::create(4, 2, 0.0, 1, true),
+                Gene::create(7, 6, 0.0, 2, true),
+                Gene::create(4, 6, 0.0, 3, true),
+                Gene::create(4, 8, 0.0, 4, true),
+                Gene::create(6, 5, 0.0, 5, true),
+                Gene::create(5, 4, 0.0, 6, true),
+                Gene::create(1, 5, 0.0, 7, true),
+                Gene::create(5, 3, 0.0, 8, true),
+                Gene::create(9, 7, 0.0, 8, true),
+                
+            ], 2, 2);
+
         let phenome =  Phenome::create_from_genome(&genome);
         phenome.print_full_mermaid_graph();
 

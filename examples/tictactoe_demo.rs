@@ -185,13 +185,14 @@ fn print_best_genome(population: &Population) {
 
 fn test_tictactoe() {
     let mut settings = Settings::standard(10, 9);
-    settings.n_organisms = 300;
+    settings.n_organisms = 1000;
+    settings.n_species_max = 60;
     settings.mutate_weight_rate = 0.1;
     settings.mutate_weight_scale = 0.1;
     settings.mutate_add_connection_rate = 0.03;
     settings.mutate_add_node_rate = 0.05;
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(12);
     let mut population = Population::init(&mut rng, &settings);
 
     let mut evaluator = TicTacToeEvaluator;
@@ -201,14 +202,14 @@ fn test_tictactoe() {
     describe_population_fitness(&population);
 
 
-    for _ in 0..20000 {
+    for _ in 0..100000 {
         population.next_generation(&mut rng, &settings);
         if population.generation % 20 == 0 {
             println!("generation: {:?}", population.generation);
             describe_population_demographics(&population);
         }
         
-        population.evaluate_all(&mut evaluator);
+        population.evaluate_two_player(&mut evaluator);
         if population.generation % 20 == 0 {
             describe_population_fitness(&population);
         }

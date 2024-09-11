@@ -24,7 +24,7 @@ impl InnovationContext {
                 self.next_innovation_number = self.next_innovation_number.inc();
                 *i
             },
-            Err(i) => i.entry.get().clone()
+            Err(i) => *i.entry.get()
         }
     }
 

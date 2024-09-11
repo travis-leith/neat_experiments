@@ -30,7 +30,7 @@ impl Organism {
         let genome = Genome::init(rng, n_sensor_nodes, n_output_nodes);
         Self::create_from_genome(genome)
     }
-    pub fn activate(&mut self, sensor_values: &Vec<f64>) -> Vec<f64> {
+    pub fn activate(&mut self, sensor_values: &[f64]) -> Vec<f64> {
         debug_assert!(sensor_values.len() == self.genome.n_sensor_nodes);
         self.phenome.activate(sensor_values);
         self.phenome.outputs.iter().map(|node_index| self.phenome.nodes[*node_index].value).collect()

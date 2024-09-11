@@ -94,7 +94,7 @@ impl Genome {
         let between = Uniform::from(-1.0..1.0);
 
         let n_connections = n_sensor_nodes * n_output_nodes;
-        let mut data = IndexMap::with_capacity_and_hasher(n_connections, FxBuildHasher::default());
+        let mut data = IndexMap::with_capacity_and_hasher(n_connections, FxBuildHasher);
 
         for out_node_ind in 0..n_output_nodes {
             let out_node_id = out_node_ind + n_sensor_nodes;
@@ -179,9 +179,9 @@ impl Genome {
                     n1 += 1;
                     n2 += 1;
                     excess_side = ExcessSide::Neither;
-                    disjoint_count = disjoint_count + excess_count;
+                    disjoint_count += excess_count;
                     excess_count = 0;
-                    total_weight_diff = total_weight_diff + (left_gene_value.weight - right_gene_value.weight).abs();
+                    total_weight_diff += (left_gene_value.weight - right_gene_value.weight).abs();
                 },
                 AllignedTuplePair::HasLeft(_) => {
                     n1 +=1;
@@ -192,7 +192,7 @@ impl Genome {
                         },
                         ExcessSide::Right => {
                             excess_side = ExcessSide::Left;
-                            disjoint_count = disjoint_count + excess_count;
+                            disjoint_count += excess_count;
                             excess_count = 1;
                         },
                         ExcessSide::Left => {
@@ -212,7 +212,7 @@ impl Genome {
                         },
                         ExcessSide::Left => {
                             excess_side = ExcessSide::Right;
-                            disjoint_count = disjoint_count + excess_count;
+                            disjoint_count += excess_count;
                             excess_count = 1;
                         }
                     }
@@ -313,8 +313,7 @@ pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: usize, 
     let get_id = |gene: (&GeneKey, &GeneValue)| gene.1.innovation;
     let new_genome_data = allign_indexmap_map(&genome_1.data, &genome_2.data, &get_id, &mut choose_gene);
     let new_next_node_id = NodeId(std::cmp::max(genome_1.next_node_id.0, genome_2.next_node_id.0));
-    let new_genome = Genome{data: new_genome_data, next_node_id: new_next_node_id, n_sensor_nodes:genome_1.n_sensor_nodes, n_output_nodes:genome_1.n_output_nodes};
-    new_genome
+    Genome{data: new_genome_data, next_node_id: new_next_node_id, n_sensor_nodes:genome_1.n_sensor_nodes, n_output_nodes:genome_1.n_output_nodes}
 }
 
 
@@ -334,18 +333,6 @@ mod tests {
             Gene::create(3, 4, 0.0, 4, true),
         ], 2, 2)
     } 
-
-    fn genome_sample_recurrent_1() -> Genome{
-        Genome::create(vec![
-            Gene::create(3, 2, 0.9, 0, true),
-            Gene::create(1, 4, -0.8, 1, true),
-            Gene::create(4, 3, 0.1, 2, true),
-            Gene::create(5, 2, -0.4, 3, true),
-            Gene::create(0, 4, -0.8, 4, true),
-            Gene::create(3, 5, 0.5, 5, true),
-            Gene::create(5, 4, -0.1, 6, true),
-        ], 2, 1)
-    }
     
     #[test]
     fn test_genome_max_node_id() {
@@ -376,58 +363,5 @@ mod tests {
         genome.add_node(&mut innovation_context, GeneIndex(0));
         assert_eq!(genome.len(), 7);
     }
-
-    // fn generate_random_genes(n: usize, m: usize, random_seed: u64) -> Vec<Gene> {
-    //     let mut rng = Xoshiro256PlusPlus::seed_from_u64(random_seed);
-    //     let mut seen = FxHashSet::default();
-    //     let mut iters = 0;
-    //     let max_iterations = n * n;
-
-    //     while seen.len() < n && iters < max_iterations {
-    //         let input = rng.gen_range(0..m);
-    //         let output = rng.gen_range(0..m);
-    //         let pair = (input, output);
-    //         let reverse_pair = (output, input);
-    
-    //         if !seen.contains(&pair) && !seen.contains(&reverse_pair) && input != output {
-    //             seen.insert(pair);
-    //         }
-    //         iters += 1;
-    //     }
-    
-    //     seen.iter().enumerate().map(|(i, gene)| {
-    //         let weight = rng.gen_range(-1.0..1.0);
-    //         let innovation = i;
-    //         let enabled = true;
-    //         Gene::create(gene.0, gene.1, weight, innovation, enabled)
-    //     }).collect()
-    // }
-
-    // extern crate test;
-    // #[bench]
-    // fn bench_tarjan_scc(b: &mut test::Bencher) {
-    //     let genes = generate_random_genes(1000, 30, 123);
-    //     let genome = Genome::create(genes, 10, 10);
-    //     b.iter(|| {
-    //         genome.tarjan_scc();
-    //     });
-    // }
-
-    // #[test]
-    // fn test_dfs_order2(){
-    //     let genome = genome_sample_recurrent_1();
-
-    //     for (gene_key, gene_value) in genome.data.iter() {
-    //         println!("{:?}---|{:.4}|{:?}", gene_key.in_node_id.0, gene_value.weight, gene_key.out_node_id.0);
-    //     }
-
-    //     println!("rev dfs order");
-    //     let dfs_order = genome.rev_dfs_order_petgraph();
-
-    //     for node_index in dfs_order {
-    //         println!("{:?}", node_index.0);
-    //     }
-
-    // }
 
 }

@@ -8,7 +8,7 @@ pub enum AllignedPair<'a, T>{
     HasRight(&'a T),
 }
 
-pub fn allign<'a, T, I, R, F, M>(v1: &Vec<T>, v2: &Vec<T>, get_id: &'a F, map: &'a mut M) -> Vec<R>
+pub fn allign<'a, T, I, R, F, M>(v1: &[T], v2: &[T], get_id: &'a F, map: &'a mut M) -> Vec<R>
 where 
     I: std::cmp::PartialOrd,
     F: Fn(&T) -> I,
@@ -81,7 +81,7 @@ where
     let n_res = std::cmp::max(n1,n2);
     let mut i1 = 0;
     let mut i2 = 0;
-    let mut res: FxIndexMap<K,V> = IndexMap::with_capacity_and_hasher(n_res, FxBuildHasher::default());
+    let mut res: FxIndexMap<K,V> = IndexMap::with_capacity_and_hasher(n_res, FxBuildHasher);
     while i1 < n1 || i2 < n2 {
         if i1 < n1 {
             let x1 = m1.get_index(i1).unwrap();
@@ -136,7 +136,7 @@ where
     I: std::cmp::PartialOrd,
     K: std::cmp::Eq + std::hash::Hash,
     F: Fn((&K,&V)) -> I,
-    M: FnMut(AllignedTuplePair<K,V>) -> ()
+    M: FnMut(AllignedTuplePair<K,V>)
 {
     let n1 = m1.len();
     let n2 = m2.len();

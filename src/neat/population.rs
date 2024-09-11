@@ -190,7 +190,7 @@ impl Population {
         use rayon::prelude::*;
         use std::sync::Mutex;
         
-        let mut organisms: Vec<_> = self.organisms.iter_mut().map(|org| Mutex::new(org)).collect();
+        let mut organisms: Vec<_> = self.organisms.iter_mut().map(Mutex::new).collect();
         for i in 0 .. organisms.len() {
             let (left, others) = organisms.split_at_mut(i);
             let (middle, right) = others.split_at_mut(1);
