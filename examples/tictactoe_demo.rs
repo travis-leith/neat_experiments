@@ -88,12 +88,18 @@ fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
                 GameOverState::Won(player) => {
                     match player {
                         Player::Circle => {
-                            ctrl.circle.fitness += 2;
+                            ctrl.circle.fitness += 10;
                             // ctrl.cross.fitness -= 1;
+                            if ctrl.cross.fitness > 0 {
+                                ctrl.cross.fitness -= 1;
+                            }
                         },
                         Player::Cross => {
                             // ctrl.circle.fitness -= 1;
-                            ctrl.cross.fitness += 2;
+                            ctrl.cross.fitness += 10;
+                            if ctrl.circle.fitness > 0 {
+                                ctrl.circle.fitness -= 1;
+                            }
                         }
                     }
                 },
@@ -103,12 +109,8 @@ fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
                             if ctrl.circle.fitness > 0 {
                                 ctrl.circle.fitness -= 1;
                             }
-                            // ctrl.cross.fitness += 1;
-                            // ctrl.circle.fitness -= 1;
                         },
                         Player::Cross => {
-                            // ctrl.circle.fitness += 1;
-                            // ctrl.cross.fitness -= 1;
                             if ctrl.cross.fitness > 0 {
                                 ctrl.cross.fitness -= 1;
                             }
@@ -162,6 +164,10 @@ fn describe_population_demographics(population: &Population) {
 fn describe_population_fitness(population: &Population) {
     // println!("generation: {:?}; n_species: {:?}", population.generation, population.species.len());
     let avg_fitness = population.species.iter().map(|s| s.avg_fitness).sum::<f64>() / population.species.len() as f64;
+    let best_species = population.species.iter().max_by(|a, b| a.avg_fitness.partial_cmp(&b.avg_fitness).unwrap_or(std::cmp::Ordering::Equal)).unwrap();
+    let champion = &population.organisms[best_species.champion];
+    let champ_size: usize = champion.phenome.activation_order.iter().map(|(_, x)| x.len()).sum();
+    let champ_full_size = champion.genome.data.len();
     let max_fitness = population.organisms.iter().map(|o| o.fitness).fold(0, |acc, x| acc.max(x));
     let min_fitness = population.organisms.iter().map(|o| o.fitness).fold(1000, |acc, x| acc.min(x));
 
@@ -171,7 +177,7 @@ fn describe_population_fitness(population: &Population) {
     //     println!("\taverage fitness: {:?}", s.avg_fitness);
     //     println!("");
     // }
-    println!("avg fitness: {:?}; max fitness: {:?}; min fitness: {:?}", avg_fitness, max_fitness, min_fitness);
+    println!("avg fitness: {:.4}; max fitness: {}; best org size: {}({}); min fitness: {}, best_species: {} with size {} and fitness {:.4}", avg_fitness, max_fitness, champ_size, champ_full_size, min_fitness, best_species.id, best_species.members.len(), best_species.avg_fitness);
 }
 
 fn print_best_genome(population: &Population) {
@@ -185,24 +191,28 @@ fn print_best_genome(population: &Population) {
 
 fn test_tictactoe() {
     let mut settings = Settings::standard(10, 9);
-    settings.n_organisms = 1000;
+    settings.n_organisms = 200 * 16;
     settings.n_species_max = 60;
+    settings.n_species_min = 40;
     settings.mutate_weight_rate = 0.1;
     settings.mutate_weight_scale = 0.1;
     settings.mutate_add_connection_rate = 0.03;
     settings.mutate_add_node_rate = 0.05;
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(12);
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(123);
+    
     let mut population = Population::init(&mut rng, &settings);
+    
 
     let mut evaluator = TicTacToeEvaluator;
 
     describe_population_demographics(&population);
-    population.evaluate_all(&mut evaluator);        
+    println!("evaluating initial population");
+    population.evaluate_two_player(&mut evaluator);        
     describe_population_fitness(&population);
 
-
-    for _ in 0..100000 {
+    println!("starting evolution");
+    for _ in 0..5000 {
         population.next_generation(&mut rng, &settings);
         if population.generation % 20 == 0 {
             println!("generation: {:?}", population.generation);
@@ -213,6 +223,10 @@ fn test_tictactoe() {
         if population.generation % 20 == 0 {
             describe_population_fitness(&population);
         }
+
+        // if population.generation % 1000 == 0 {
+        //     population.trim_genomes();
+        // }
         
     }
 

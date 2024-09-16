@@ -1,8 +1,11 @@
-use super::{common::Settings, genome::{self, Genome}, innovation::InnovationContext, organism::{Organism, OrganismIndex, Organisms}};
+use super::{common::Settings, genome::{self, Genome}, organism::{Organism, OrganismIndex, Organisms}};
 use itertools::Itertools;
-use rand::{Rng, RngCore};
+use rand::{Rng, RngCore, SeedableRng};
+use rand_xoshiro::Xoshiro256PlusPlus;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 pub struct Species {
+    pub id: usize,
     pub members: Vec<OrganismIndex>,
     pub representative: Genome,
     pub champion: OrganismIndex,
@@ -14,7 +17,7 @@ pub struct Population {
     pub organisms: Organisms,
     species_distance_threshold: f64,
     pub generation: usize,
-    innovation_context: InnovationContext
+    pub next_species_id: usize
 }
 
 pub trait SinglePlayerArena {
@@ -47,8 +50,10 @@ impl Population {
                     members: vec![organism_index],
                     representative: organism.genome.clone(),
                     champion: organism_index,
-                    avg_fitness: 0.0
+                    avg_fitness: 0.0,
+                    id: self.next_species_id
                 };
+                self.next_species_id += 1;
                 self.species.push(new_species);
             }
         }
@@ -68,7 +73,7 @@ impl Population {
 
             let n_non_empty_species = self.species.iter().filter(|s| !s.members.is_empty()).count();
             if n_non_empty_species < settings.n_species_min {
-                self.species_distance_threshold *= 0.9;
+                self.species_distance_threshold *= 0.91;
             } else if n_non_empty_species > settings.n_species_max {
                 self.species_distance_threshold *= 1.1;
             } else {
@@ -82,9 +87,9 @@ impl Population {
     }
 
     pub fn init<R: RngCore>(rng: &mut R, settings: &Settings) -> Population {
-        let innovation_context = InnovationContext::init(settings.n_sensor_nodes, settings.n_output_nodes);
         let mut organisms = Vec::new();
 
+        println!("initializing population");
         for _ in 0..settings.n_organisms {
             let organism = Organism::init(rng, settings.n_sensor_nodes, settings.n_output_nodes);
             organisms.push(organism);
@@ -95,10 +100,12 @@ impl Population {
             organisms: Organisms::new(organisms),
             species_distance_threshold: 0.3,
             generation: 0,
-            innovation_context
+            next_species_id: 0
         };
 
+        println!("speciating");
         res.speciate(rng, settings);
+        println!("population initialized");
         res
     }
 
@@ -167,7 +174,7 @@ impl Population {
 
     pub fn evaluate_two_player<A: TurnBasedArena + Send + Sync>(&mut self, evaluator: &A) {
         use rayon::prelude::*;
-        self.organisms.par_chunks_mut(100).for_each(|chunk| {
+        self.organisms.par_chunks_mut(200).for_each(|chunk| {
             for i in 0 .. chunk.len() {
                 let (left, others) = chunk.split_at_mut(i);
                 let (middle, right) = others.split_at_mut(1);
@@ -213,6 +220,64 @@ impl Population {
         self.set_champions();
     }
 
+    pub fn next_generation_par<R: RngCore>(&mut self, rng: &mut R, settings: &Settings) {
+        self.generation += 1;
+        
+        let total_avg_fitness: f64 = self.species.iter().map(|s| s.avg_fitness).sum(); //TODO: move inside loop
+
+        let offspring_per_species = 
+            if total_avg_fitness > 0.0 {
+                self.species.iter()
+                .map(|s| (s.avg_fitness / total_avg_fitness * settings.n_organisms as f64).round() as usize)
+                .collect_vec()
+            } else {
+                let n = settings.n_organisms / self.species.len();
+                vec![n; self.species.len()]
+            };
+        
+    
+        // Initialize a vector of seeds from the incoming R
+        let seeds: Vec<_> = (0..self.species.len()).map(|_| rng.gen()).collect();
+    
+        // Zip the seeds with the species iterator
+        let new_population: Vec<Organism> = 
+            self.species
+            .par_iter_mut()
+            .enumerate()
+            .map(|(i, s)| {
+                
+                let mut local_rng = Xoshiro256PlusPlus::seed_from_u64(seeds[i]);
+                let mut local_new_population = Vec::new();
+    
+                let n_offspring = offspring_per_species[i];
+                s.members.sort_by_key(|&org_index| -(self.organisms[org_index].fitness as i64));
+                let n_members = s.members.len();
+                let n_breeders = (n_members as f64 * 0.4).ceil() as usize;
+                for _ in 0..n_offspring {
+                    let parent_1_index = s.members[local_rng.gen_range(0..n_breeders)];
+                    let parent_2_index = s.members[local_rng.gen_range(0..n_breeders)];
+                    let parent_1 = &self.organisms[parent_1_index];
+                    let parent_2 = &self.organisms[parent_2_index];
+                    let mut child_genome = genome::cross_over(&mut local_rng, &parent_1.genome, parent_1.fitness, &parent_2.genome, parent_2.fitness);
+                    child_genome.mutate(&mut local_rng, settings);
+                    let child = Organism::create_from_genome(child_genome);
+                    local_new_population.push(child);
+                }
+
+                if n_offspring > 0 {
+                    let champion = Organism::create_from_genome(self.organisms[s.champion].genome.clone());
+                    local_new_population.push(champion);
+                }
+    
+                local_new_population
+            })
+            .flatten()
+            .collect();
+    
+        self.organisms = Organisms::new(new_population);
+        self.speciate(rng, settings);
+    }
+
     pub fn next_generation<R: RngCore>(&mut self, rng: &mut R, settings: &Settings) {
         self.generation += 1;
         let mut new_population = Vec::new();
@@ -240,7 +305,7 @@ impl Population {
                 let parent_1 = &self.organisms[parent_1_index];
                 let parent_2 = &self.organisms[parent_2_index];
                 let mut child_genome = genome::cross_over(rng, &parent_1.genome, parent_1.fitness, &parent_2.genome, parent_2.fitness);
-                child_genome.mutate(rng, &mut self.innovation_context, settings);
+                child_genome.mutate(rng, settings);
                 let child = Organism::create_from_genome(child_genome);
                 new_population.push(child);
             }
@@ -255,6 +320,15 @@ impl Population {
         self.speciate(rng, settings)
     }
 
+    pub fn trim_genomes(&mut self) {
+        for s in self.species.iter_mut() {
+            for &org_index in &s.members {
+                let org = &mut self.organisms[org_index];
+                org.trim_genome();
+            }
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -266,7 +340,5 @@ mod tests {
         let settings = Settings::standard(3, 1);
         let mut rng = rand::thread_rng();
         let population = Population::init(&mut rng, &settings);
-        assert_eq!(population.innovation_context.innovation_map.len(), settings.n_sensor_nodes * settings.n_output_nodes);
-        assert_eq!(population.innovation_context.next_innovation_number.0, settings.n_sensor_nodes * settings.n_output_nodes);
     }
 }

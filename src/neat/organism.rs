@@ -1,7 +1,9 @@
 use std::ops::{Index, IndexMut};
+use itertools::Itertools;
 use rand::{seq::SliceRandom, RngCore};
+use rustc_hash::FxHashSet;
 use crate::neat::genome::Genome;
-use super::phenome::Phenome;
+use super::{genome::GeneKey, phenome::Phenome};
 
 #[derive(Clone, Copy)]
 pub struct OrganismIndex(pub usize);
@@ -38,6 +40,21 @@ impl Organism {
 
     pub fn clear_values(&mut self) {
         self.phenome.clear_values();
+    }
+
+    pub fn trim_genome(&mut self) {
+        let distinct_gene_keys : FxHashSet<GeneKey> = 
+            self.phenome.activation_order.iter().flat_map(|(out_node_index, inputs)| {
+                let out_node_id = self.phenome.nodes[*out_node_index].id;
+            inputs.iter().map(|(in_node_index, _)| {
+                let in_node_id = self.phenome.nodes[*in_node_index].id;
+                GeneKey{in_node_id, out_node_id}
+            }).collect_vec()
+        }).collect();
+
+        self.genome.data.retain(|gene_key, _| distinct_gene_keys.contains(&gene_key));
+        self.phenome = Phenome::create_from_genome(&self.genome);
+
     }
 }
 
@@ -102,55 +119,54 @@ impl<'a> IntoParallelRefMutIterator<'a> for Organisms {
 
 #[cfg(test)]
 mod tests {
-    use crate::neat::{genome::{Gene, GeneExt, GeneIndex, Genome, NodeId}, organism::Organism};
+    use crate::neat::{genome::{Gene, GeneExt, Genome, NodeId}, organism::Organism};
     use assert_approx_eq::assert_approx_eq;
 
     fn genome_sample_feed_forward_1() -> Genome{
         Genome::create(vec![
-            Gene::create(0, 4, -0.1, 0, true),
-            Gene::create(4, 3, 0.6, 1, true),
-            Gene::create(1, 5, -0.8, 2, true),
-            Gene::create(5, 3, -0.9, 3, true),
-            Gene::create(0, 5, 0.6, 4, true),
-            Gene::create(5, 2, 0.4, 5, true),
+            Gene::create(0, 4, -0.1, true),
+            Gene::create(4, 3, 0.6, true),
+            Gene::create(1, 5, -0.8, true),
+            Gene::create(5, 3, -0.9, true),
+            Gene::create(0, 5, 0.6, true),
+            Gene::create(5, 2, 0.4, true),
         ], 2, 2)
     }
 
     fn genome_sample_recurrent_1() -> Genome{
         Genome::create(vec![
-            Gene::create(3, 2, 0.9, 0, true),
-            Gene::create(1, 4, -0.8, 1, true),
-            Gene::create(4, 3, 0.1, 2, true),
-            Gene::create(5, 2, -0.4, 3, true),
-            Gene::create(0, 4, -0.8, 4, true),
-            Gene::create(3, 5, 0.5, 5, true),
-            Gene::create(5, 4, -0.1, 6, true),
+            Gene::create(3, 2, 0.9, true),
+            Gene::create(1, 4, -0.8, true),
+            Gene::create(4, 3, 0.1, true),
+            Gene::create(5, 2, -0.4, true),
+            Gene::create(0, 4, -0.8, true),
+            Gene::create(3, 5, 0.5, true),
+            Gene::create(5, 4, -0.1, true),
         ], 2, 1)
     }
 
     #[test]
-    fn network_creation() {
-        let network =  Organism::create_from_genome(genome_sample_feed_forward_1());
-        assert_eq!(network.phenome.try_node_id(NodeId(2)).map(|n|n.inputs.len()), Some(1));
-        assert_eq!(network.phenome.try_node_id(NodeId(3)).map(|n|n.inputs.len()), Some(2));
-        assert_eq!(network.phenome.try_node_id(NodeId(4)).map(|n|n.inputs.len()), Some(1));
+    fn organism_creation() {
+        let organism =  Organism::create_from_genome(genome_sample_feed_forward_1());
+        assert_eq!(organism.phenome.try_node_id(NodeId(2)).map(|n|n.inputs.len()), Some(1));
+        assert_eq!(organism.phenome.try_node_id(NodeId(3)).map(|n|n.inputs.len()), Some(2));
+        assert_eq!(organism.phenome.try_node_id(NodeId(4)).map(|n|n.inputs.len()), Some(1));
     }
 
     #[test]
-    fn network_init(){
+    fn organsim_init(){
         let mut rng = rand::thread_rng();
         let n_sensor_nodes = 9;
         let n_output_nodes = 10;
         let n_total = n_sensor_nodes + n_output_nodes;
-        let network = Organism::init(&mut rng, n_sensor_nodes, n_output_nodes);
-        assert_eq!(network.genome.get_index(GeneIndex(89)).1.innovation.0, 89);
-        assert_eq!(network.genome.len(), 90);
-        assert_eq!(network.phenome.nodes.len(), n_total);
-        assert_eq!(network.genome.n_output_nodes, n_output_nodes);
-        assert_eq!(network.genome.n_sensor_nodes, n_sensor_nodes);
+        let organism = Organism::init(&mut rng, n_sensor_nodes, n_output_nodes);
+        assert_eq!(organism.genome.len(), 90);
+        assert_eq!(organism.phenome.nodes.len(), n_total);
+        assert_eq!(organism.genome.n_output_nodes, n_output_nodes);
+        assert_eq!(organism.genome.n_sensor_nodes, n_sensor_nodes);
 
-        for node_index in network.genome.n_sensor_nodes..network.phenome.nodes.len() {
-            let input_length = network.phenome.try_node_id(NodeId(node_index)).map(|n|n.inputs.len());
+        for node_index in organism.genome.n_sensor_nodes..organism.phenome.nodes.len() {
+            let input_length = organism.phenome.try_node_id(NodeId(node_index)).map(|n|n.inputs.len());
             assert_eq!(input_length, Some(n_sensor_nodes))
         }
     }
