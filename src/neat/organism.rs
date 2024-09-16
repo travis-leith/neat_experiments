@@ -146,27 +146,27 @@ mod tests {
     }
 
     #[test]
-    fn network_creation() {
-        let network =  Organism::create_from_genome(genome_sample_feed_forward_1());
-        assert_eq!(network.phenome.try_node_id(NodeId(2)).map(|n|n.inputs.len()), Some(1));
-        assert_eq!(network.phenome.try_node_id(NodeId(3)).map(|n|n.inputs.len()), Some(2));
-        assert_eq!(network.phenome.try_node_id(NodeId(4)).map(|n|n.inputs.len()), Some(1));
+    fn organism_creation() {
+        let organism =  Organism::create_from_genome(genome_sample_feed_forward_1());
+        assert_eq!(organism.phenome.try_node_id(NodeId(2)).map(|n|n.inputs.len()), Some(1));
+        assert_eq!(organism.phenome.try_node_id(NodeId(3)).map(|n|n.inputs.len()), Some(2));
+        assert_eq!(organism.phenome.try_node_id(NodeId(4)).map(|n|n.inputs.len()), Some(1));
     }
 
     #[test]
-    fn network_init(){
+    fn organsim_init(){
         let mut rng = rand::thread_rng();
         let n_sensor_nodes = 9;
         let n_output_nodes = 10;
         let n_total = n_sensor_nodes + n_output_nodes;
-        let network = Organism::init(&mut rng, n_sensor_nodes, n_output_nodes);
-        assert_eq!(network.genome.len(), 90);
-        assert_eq!(network.phenome.nodes.len(), n_total);
-        assert_eq!(network.genome.n_output_nodes, n_output_nodes);
-        assert_eq!(network.genome.n_sensor_nodes, n_sensor_nodes);
+        let organism = Organism::init(&mut rng, n_sensor_nodes, n_output_nodes);
+        assert_eq!(organism.genome.len(), 90);
+        assert_eq!(organism.phenome.nodes.len(), n_total);
+        assert_eq!(organism.genome.n_output_nodes, n_output_nodes);
+        assert_eq!(organism.genome.n_sensor_nodes, n_sensor_nodes);
 
-        for node_index in network.genome.n_sensor_nodes..network.phenome.nodes.len() {
-            let input_length = network.phenome.try_node_id(NodeId(node_index)).map(|n|n.inputs.len());
+        for node_index in organism.genome.n_sensor_nodes..organism.phenome.nodes.len() {
+            let input_length = organism.phenome.try_node_id(NodeId(node_index)).map(|n|n.inputs.len());
             assert_eq!(input_length, Some(n_sensor_nodes))
         }
     }

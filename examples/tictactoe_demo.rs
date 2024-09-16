@@ -88,30 +88,32 @@ fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
                 GameOverState::Won(player) => {
                     match player {
                         Player::Circle => {
-                            ctrl.circle.fitness += 2;
+                            ctrl.circle.fitness += 10;
                             // ctrl.cross.fitness -= 1;
+                            if ctrl.cross.fitness > 0 {
+                                ctrl.cross.fitness -= 1;
+                            }
                         },
                         Player::Cross => {
                             // ctrl.circle.fitness -= 1;
-                            ctrl.cross.fitness += 2;
+                            ctrl.cross.fitness += 10;
+                            if ctrl.circle.fitness > 0 {
+                                ctrl.circle.fitness -= 1;
+                            }
                         }
                     }
                 },
                 GameOverState::Disqualified(player,_) => {
                     match player {
                         Player::Circle => {
-                            // if ctrl.circle.fitness > 0 {
-                            //     ctrl.circle.fitness -= 1;
-                            // }
-                            // ctrl.cross.fitness += 1;
-                            // ctrl.circle.fitness -= 1;
+                            if ctrl.circle.fitness > 0 {
+                                ctrl.circle.fitness -= 1;
+                            }
                         },
                         Player::Cross => {
-                            // ctrl.circle.fitness += 1;
-                            // ctrl.cross.fitness -= 1;
-                            // if ctrl.cross.fitness > 0 {
-                            //     ctrl.cross.fitness -= 1;
-                            // }
+                            if ctrl.cross.fitness > 0 {
+                                ctrl.cross.fitness -= 1;
+                            }
                         }
                     }
                 }
@@ -175,7 +177,7 @@ fn describe_population_fitness(population: &Population) {
     //     println!("\taverage fitness: {:?}", s.avg_fitness);
     //     println!("");
     // }
-    println!("avg fitness: {:?}; max fitness: {:?}; best org size: {}({}); min fitness: {:?}, best_species: {} with size {} and fitness {:.4}", avg_fitness, max_fitness, champ_size, champ_full_size, min_fitness, best_species.id, best_species.members.len(), best_species.avg_fitness);
+    println!("avg fitness: {:.4}; max fitness: {}; best org size: {}({}); min fitness: {}, best_species: {} with size {} and fitness {:.4}", avg_fitness, max_fitness, champ_size, champ_full_size, min_fitness, best_species.id, best_species.members.len(), best_species.avg_fitness);
 }
 
 fn print_best_genome(population: &Population) {
@@ -204,13 +206,13 @@ fn test_tictactoe() {
 
     let mut evaluator = TicTacToeEvaluator;
 
-    // describe_population_demographics(&population);
+    describe_population_demographics(&population);
     println!("evaluating initial population");
     population.evaluate_two_player(&mut evaluator);        
-    // describe_population_fitness(&population);
+    describe_population_fitness(&population);
 
     println!("starting evolution");
-    for _ in 0..10000 {
+    for _ in 0..5000 {
         population.next_generation(&mut rng, &settings);
         if population.generation % 20 == 0 {
             println!("generation: {:?}", population.generation);
