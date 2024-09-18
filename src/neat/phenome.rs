@@ -1,14 +1,14 @@
 use std::collections::VecDeque;
 use std::ops::Index;
 use std::ops::IndexMut;
-
+use serde::{Serialize, Deserialize};
 use indexmap::IndexMap;
 use itertools::Itertools;
 
 use super::genome::Genome;
 use super::genome::NodeId;
 
-#[derive(PartialEq, Default, Clone, Debug)]
+#[derive(PartialEq, Default, Clone, Debug, Serialize, Deserialize)]
 pub enum NodeType{
     Sensor,
     #[default] //TODO is a default really needed here?
@@ -16,7 +16,7 @@ pub enum NodeType{
     Output,
 }
 
-#[derive(PartialEq, PartialOrd, Clone, Copy, Hash, Eq, Debug)]
+#[derive(PartialEq, PartialOrd, Clone, Copy, Hash, Eq, Debug, Serialize, Deserialize)]
 pub struct NodeIndex(pub usize);
 
 impl NodeIndex {
@@ -25,17 +25,17 @@ impl NodeIndex {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct EdgeIndex(pub usize);
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Edge {
     pub source: NodeIndex,
     pub target: NodeIndex,
     pub weight: f64
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     pub value: f64,
     pub inputs: Vec<EdgeIndex>,
@@ -54,7 +54,7 @@ impl Node {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct NodeMap(IndexMap<NodeId, Node, rustc_hash::FxBuildHasher>);
 
 impl NodeMap {
@@ -116,7 +116,7 @@ impl IndexMut<NodeIndex> for NodeMap {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Edges(Vec<Edge>);
 
 impl Edges {
@@ -132,7 +132,7 @@ impl Index<EdgeIndex> for Edges {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Phenome{
     pub nodes: NodeMap,
     pub edges: Edges,

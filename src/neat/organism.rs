@@ -4,12 +4,13 @@ use rand::{seq::SliceRandom, RngCore};
 use rustc_hash::FxHashSet;
 use crate::neat::genome::Genome;
 use super::{genome::GeneKey, phenome::Phenome};
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct OrganismIndex(pub usize);
 
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Organism {
     pub phenome: Phenome,
     pub genome: Genome,
@@ -58,6 +59,7 @@ impl Organism {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Organisms(Vec<Organism>);
 use rayon::prelude::*;
 

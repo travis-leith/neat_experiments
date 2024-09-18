@@ -1,11 +1,14 @@
 
 
 extern crate neat_experiments;
+use std::{fs::File, io::Write};
+
 use itertools::Itertools;
 use neat_experiments::neat::{common::Settings, organism::Organism, population::TurnBasedArena};
 use rand_xoshiro::Xoshiro256PlusPlus;
 mod tictactoe;
 
+use serde::{Serialize, Deserialize};
 use tictactoe::{cli::get_user_move, game::*};
 use rand::SeedableRng;
 // use rand::seq::SliceRandom;
@@ -73,6 +76,11 @@ impl Controller for NeatVsNeat<'_> {
         let res = neat_move(&mut self.cross, Player::Cross, gameboard);
         // println!("cross AI has selected move: {:?}", res);
         res
+    }
+
+    fn reset(&mut self) {
+        self.cross.clear_values();
+        self.circle.clear_values();
     }
 }
 
@@ -149,11 +157,15 @@ impl Controller for InitNetworkAiVsUser {
     fn cross_mover(&mut self, gameboard: &GameBoard) -> CellLocation {
         get_user_move(gameboard)
     }
+
+    fn reset(&mut self) {
+        self.org.clear_values();
+    }
 }
 
 
 fn describe_population_demographics(population: &Population) {
-    println!("generation: {:?}; n_species: {:?}", population.generation, population.species.len());
+    println!("generation: {:?}; n_species: {:?}, species_distance: {:.8}", population.generation, population.species.len(), population.species_distance_threshold);
     // for (i, s) in population.species.iter().enumerate() {
     //     println!("\tspecies: {:?}", i);
     //     println!("\tnumber of members: {:?}", s.members.len());
@@ -189,11 +201,21 @@ fn print_best_genome(population: &Population) {
     best_org.phenome.print_mermaid_graph();
 }
 
+fn get_species_stats(population: &Population) -> Vec<(usize, usize, usize)> {
+    population.species.iter().map(|s| (population.generation, s.members.len(), s.id)).collect()
+}
+
+use rmp_serde::encode::to_vec;
+#[derive(Serialize, Deserialize)]
+struct ApplicationState {
+    population: Population,
+    rng: Xoshiro256PlusPlus,
+}
 fn test_tictactoe() {
     let mut settings = Settings::standard(10, 9);
     settings.n_organisms = 200 * 16;
-    settings.n_species_max = 60;
-    settings.n_species_min = 40;
+    settings.n_species_max = 200;
+    settings.n_species_min = 5;
     settings.mutate_weight_rate = 0.1;
     settings.mutate_weight_scale = 0.1;
     settings.mutate_add_connection_rate = 0.03;
@@ -212,10 +234,12 @@ fn test_tictactoe() {
     describe_population_fitness(&population);
 
     println!("starting evolution");
-    for _ in 0..5000 {
+    let n_iterations = 1000;
+    let mut species_stats = Vec::with_capacity(n_iterations + 1);
+    species_stats.push(get_species_stats(&population));
+    for _ in 0..n_iterations {
         population.next_generation(&mut rng, &settings);
         if population.generation % 20 == 0 {
-            println!("generation: {:?}", population.generation);
             describe_population_demographics(&population);
         }
         
@@ -223,14 +247,38 @@ fn test_tictactoe() {
         if population.generation % 20 == 0 {
             describe_population_fitness(&population);
         }
+        // fn is_sorted<T: Ord>(vec: &Vec<T>) -> bool {
+        //     vec.windows(2).all(|w| w[0] <= w[1])
+        // }
+    
+        // for org in population.organisms.iter() {
+        //     let distinct_nodes = &org.genome.distinct_node_ids;
+        //     assert!(is_sorted(distinct_nodes));
+        // }
 
+        // if population.generation == 253 {
+        //     let application_state = ApplicationState{population: population.clone(), rng: rng.clone()};
+        //     let app_msgpack = to_vec(&application_state).unwrap();
+        //     let mut file = File::create("app_253.mpk").unwrap();
+        //     file.write_all(&app_msgpack).unwrap();
+        // }
+        species_stats.push(get_species_stats(&population));
         // if population.generation % 1000 == 0 {
         //     population.trim_genomes();
         // }
         
     }
 
-    print_best_genome(&population);
+    let app_state = ApplicationState{population: population.clone(), rng};
+    let app_state_msgpack = to_vec(&app_state).unwrap();
+    let mut file = File::create("app.mpk").unwrap();
+    file.write_all(&app_state_msgpack).unwrap();
+
+    let species_stats_msgpack = to_vec(&species_stats).unwrap();
+    let mut file = File::create("species_stats.mpk").unwrap();
+    file.write_all(&species_stats_msgpack).unwrap();
+
+    // print_best_genome(&population);
     let best_genome = 
         population.species.iter()
         .map(|s| &population.organisms[s.champion])
@@ -244,9 +292,66 @@ fn test_tictactoe() {
 
 }
 
+fn resume_test_from_file() {
+    let file = File::open("app.mpk").unwrap();
+    let app_state: ApplicationState = rmp_serde::from_read(file).unwrap();
+
+    let mut settings = Settings::standard(10, 9);
+    settings.n_organisms = 200 * 16;
+    settings.n_species_max = 200;
+    settings.n_species_min = 5;
+    settings.mutate_weight_rate = 0.1;
+    settings.mutate_weight_scale = 0.1;
+    settings.mutate_add_connection_rate = 0.03;
+    settings.mutate_add_node_rate = 0.05;
+
+    let mut evaluator = TicTacToeEvaluator;
+
+    let mut population = app_state.population;
+
+    let mut species_stats = Vec::with_capacity(1001);
+
+    let mut rng = app_state.rng;
+    for _ in 0..1000 {
+        population.next_generation(&mut rng, &settings);
+        if population.generation % 20 == 0 {
+            println!("generation: {:?}", population.generation);
+            describe_population_demographics(&population);
+        }
+        
+        population.evaluate_two_player(&mut evaluator);
+        if population.generation % 20 == 0 {
+            describe_population_fitness(&population);
+        }
+
+        species_stats.push(get_species_stats(&population));
+        
+    }
+
+    let app_state = ApplicationState{population: population.clone(), rng};
+    let app_state_msgpack = to_vec(&app_state).unwrap();
+    let mut file = File::create("app.mpk").unwrap();
+    file.write_all(&app_state_msgpack).unwrap();
+
+    let species_stats_msgpack = to_vec(&species_stats).unwrap();
+    let mut file = File::create("species_stats.mpk").unwrap();
+    file.write_all(&species_stats_msgpack).unwrap();
+
+    // print_best_genome(&population);
+    let best_genome = 
+        population.species.iter()
+        .map(|s| &population.organisms[s.champion])
+        .max_by_key(|o| o.fitness).unwrap().genome.clone();
+
+    let best_ai = Organism::create_from_genome(best_genome);
+    let mut ai_controller = InitNetworkAiVsUser {org:best_ai};
+
+    tictactoe::cli::game_loop(&mut ai_controller);
+}
 
 fn main() {
     //cargo run --release --example tictactoe_demo
-    test_tictactoe();
+    // test_tictactoe();
+    resume_test_from_file();
 }
 

@@ -3,6 +3,7 @@ use rand::{seq::SliceRandom, Rng, RngCore};
 use rand_distr::{Distribution, Normal, Uniform};
 use indexmap::IndexMap;
 use rustc_hash::FxBuildHasher;
+use serde::{Deserialize, Serialize};
 
 type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 
@@ -13,7 +14,7 @@ use super::common::Settings;
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct GeneIndex(pub usize);
 
-#[derive(PartialEq, PartialOrd, Ord, Clone, Copy, Eq, Hash)]
+#[derive(PartialEq, PartialOrd, Ord, Clone, Copy, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub usize);
 
 impl NodeId {
@@ -22,13 +23,13 @@ impl NodeId {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone)]
+#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
 pub struct GeneKey {
     pub in_node_id: NodeId,
     pub out_node_id: NodeId
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct GeneValue {
     pub weight: f64,
     pub enabled: bool
@@ -61,11 +62,11 @@ impl GeneExt for Gene {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Genome{
     pub data: FxIndexMap<GeneKey, GeneValue>,
     next_node_id: NodeId,
-    distinct_node_ids: Vec<NodeId>,
+    pub distinct_node_ids: Vec<NodeId>,
     pub n_sensor_nodes: usize,
     pub n_output_nodes: usize,
 }
@@ -76,7 +77,12 @@ impl Genome {
     }
 
     pub fn create(genes: Vec<Gene>, n_sensor_nodes: usize, n_output_nodes: usize) -> Genome {
-        let distinct_node_ids = genes.iter().flat_map(|(gene_key, _)| vec![gene_key.in_node_id, gene_key.out_node_id]).unique().collect_vec();
+        let distinct_node_ids = 
+            genes.iter()
+            .flat_map(|(gene_key, _)| vec![gene_key.in_node_id, gene_key.out_node_id])
+            .unique()
+            .sorted()
+            .collect_vec();
         let max_node_id = distinct_node_ids.iter().max().unwrap();
 
         let data = genes.into_iter().sorted_by_key(|x|x.0.clone()).collect();
@@ -100,7 +106,11 @@ impl Genome {
         }
 
         let next_node_id = NodeId(n_sensor_nodes + n_output_nodes);
-        let distinct_node_ids = (0..next_node_id.0).map(|x| NodeId(x)).collect();
+        let distinct_node_ids = 
+            (0..next_node_id.0)
+            .map(|x| NodeId(x))
+            .sorted()
+            .collect();
         Genome{data, next_node_id, n_sensor_nodes, n_output_nodes, distinct_node_ids}
     }
 
@@ -239,7 +249,7 @@ impl Genome {
                 let gene_key = GeneKey{in_node_id, out_node_id};
                 if !self.data.contains_key(&gene_key) {
                     self.add_connection(in_node_id, out_node_id, rng.gen_range(-1.0..1.0));
-                }
+                } //TODO else mutate weight
             }
         }
     }
@@ -314,7 +324,11 @@ pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: usize, 
     let get_id = |gene: (&GeneKey, &GeneValue)| gene.0.clone();
     let new_genome_data = allign_indexmap_map(&genome_1.data, &genome_2.data, &get_id, &mut choose_gene);
     let new_next_node_id = NodeId(std::cmp::max(genome_1.next_node_id.0, genome_2.next_node_id.0));
-    let distinct_node_ids = new_genome_data.iter().flat_map(|(gene_key, _)| vec![gene_key.in_node_id, gene_key.out_node_id]).unique().collect_vec();
+    let distinct_node_ids = 
+        new_genome_data.iter()
+        .flat_map(|(gene_key, _)| vec![gene_key.in_node_id, gene_key.out_node_id])
+        .sorted()
+        .unique().collect_vec();
     Genome{data: new_genome_data, next_node_id: new_next_node_id, n_sensor_nodes:genome_1.n_sensor_nodes, n_output_nodes:genome_1.n_output_nodes, distinct_node_ids}
 }
 

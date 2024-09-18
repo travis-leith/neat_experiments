@@ -119,6 +119,7 @@ fn check_game_over (gameboard: &GameBoard) -> Option<GameOverState> {
 }
 
 pub trait Controller {
+    fn reset(&mut self);
     fn circle_mover(&mut self, gameboard: &GameBoard) -> CellLocation;
     fn cross_mover(&mut self, gameboard: &GameBoard) -> CellLocation;
     fn retry_allowed(&mut self) -> bool;

@@ -151,6 +151,8 @@ pub fn game_loop(ctrl: &mut impl Controller) {
 
         if !ask_user_for_new_game() {
             break
+        } else {
+            ctrl.reset();
         }
     }
 }

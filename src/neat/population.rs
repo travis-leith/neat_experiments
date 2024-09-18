@@ -3,7 +3,9 @@ use itertools::Itertools;
 use rand::{Rng, RngCore, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Species {
     pub id: usize,
     pub members: Vec<OrganismIndex>,
@@ -12,10 +14,11 @@ pub struct Species {
     pub avg_fitness: f64
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Population {
     pub species: Vec<Species>,
     pub organisms: Organisms,
-    species_distance_threshold: f64,
+    pub species_distance_threshold: f64,
     pub generation: usize,
     pub next_species_id: usize
 }
@@ -26,7 +29,6 @@ pub trait SinglePlayerArena {
 }
 
 pub trait TurnBasedArena {
-    // fn evluate_organisms(&self, organisms: &mut Vec<&mut Organism>);
     fn evaluate_organisms(&self, org1: &mut Organism, org2: &mut Organism);
 }
 
@@ -73,10 +75,13 @@ impl Population {
 
             let n_non_empty_species = self.species.iter().filter(|s| !s.members.is_empty()).count();
             if n_non_empty_species < settings.n_species_min {
-                self.species_distance_threshold *= 0.91;
+                self.species_distance_threshold *= 0.88;
+                println!("gen: {}; n: {} - reducing species_distance_threshold to: {:.4}", self.generation, n_non_empty_species, self.species_distance_threshold);
             } else if n_non_empty_species > settings.n_species_max {
                 self.species_distance_threshold *= 1.1;
+                println!("gen: {}; n: {} - increasing species_distance_threshold to: {:.4}", self.generation, n_non_empty_species, self.species_distance_threshold);
             } else {
+                // println!("species_distance_threshold: {}", self.species_distance_threshold);
                 break;
             }
             
@@ -98,7 +103,7 @@ impl Population {
         let mut res = Population {
             species: Vec::new(),
             organisms: Organisms::new(organisms),
-            species_distance_threshold: 0.3,
+            species_distance_threshold: 1.5,
             generation: 0,
             next_species_id: 0
         };
@@ -340,5 +345,6 @@ mod tests {
         let settings = Settings::standard(3, 1);
         let mut rng = rand::thread_rng();
         let population = Population::init(&mut rng, &settings);
+        assert_eq!(population.organisms.len(), settings.n_organisms);
     }
 }
