@@ -1,7 +1,7 @@
 
 
 extern crate neat_experiments;
-use std::{fs::File, io::Write};
+use std::{cmp, fs::File, io::Write};
 
 use itertools::Itertools;
 use neat_experiments::neat::{common::Settings, organism::Organism, population::TurnBasedArena};
@@ -90,13 +90,13 @@ fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
         Ok((_, gameover_state)) => {
             match gameover_state {
                 GameOverState::Tied => {
-                    ctrl.circle.fitness += 1;
-                    ctrl.cross.fitness += 1;
+                    ctrl.circle.fitness += 2;
+                    ctrl.cross.fitness += 2;
                 },
                 GameOverState::Won(player) => {
                     match player {
                         Player::Circle => {
-                            ctrl.circle.fitness += 10;
+                            ctrl.circle.fitness += 4;
                             // ctrl.cross.fitness -= 1;
                             if ctrl.cross.fitness > 0 {
                                 ctrl.cross.fitness -= 1;
@@ -104,7 +104,7 @@ fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
                         },
                         Player::Cross => {
                             // ctrl.circle.fitness -= 1;
-                            ctrl.cross.fitness += 10;
+                            ctrl.cross.fitness += 3;
                             if ctrl.circle.fitness > 0 {
                                 ctrl.circle.fitness -= 1;
                             }
@@ -114,14 +114,14 @@ fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
                 GameOverState::Disqualified(player,_) => {
                     match player {
                         Player::Circle => {
-                            if ctrl.circle.fitness > 0 {
-                                ctrl.circle.fitness -= 1;
-                            }
+                            ctrl.cross.fitness += 1;
+                            let circle_penalty = cmp::min(3, ctrl.circle.fitness);
+                            ctrl.circle.fitness -= circle_penalty;
                         },
                         Player::Cross => {
-                            if ctrl.cross.fitness > 0 {
-                                ctrl.cross.fitness -= 1;
-                            }
+                            ctrl.circle.fitness += 1;
+                            let cross_penalty = cmp::min(3, ctrl.cross.fitness);
+                            ctrl.cross.fitness -= cross_penalty;
                         }
                     }
                 }
@@ -183,7 +183,7 @@ fn describe_population_fitness(population: &Population) {
     let max_fitness = population.organisms.iter().map(|o| o.fitness).fold(0, |acc, x| acc.max(x));
     let min_fitness = population.organisms.iter().map(|o| o.fitness).fold(1000, |acc, x| acc.min(x));
 
-    // for (i, s) in population.species.iter().enumerate() {
+    // for (i, s) in population.species.iter().enumerate() {y
     //     println!("\tspecies: {:?}", i);
     //     println!("\tchampion fitness: {:?}", population.organisms[s.champion].fitness);
     //     println!("\taverage fitness: {:?}", s.avg_fitness);
@@ -210,6 +210,7 @@ use rmp_serde::encode::to_vec;
 struct ApplicationState {
     population: Population,
     rng: Xoshiro256PlusPlus,
+    settings: Settings
 }
 fn test_tictactoe() {
     let mut settings = Settings::standard(10, 9);
@@ -221,7 +222,7 @@ fn test_tictactoe() {
     settings.mutate_add_connection_rate = 0.03;
     settings.mutate_add_node_rate = 0.05;
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(123);
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(1234);
     
     let mut population = Population::init(&mut rng, &settings);
     
@@ -238,7 +239,7 @@ fn test_tictactoe() {
     let mut species_stats = Vec::with_capacity(n_iterations + 1);
     species_stats.push(get_species_stats(&population));
     for _ in 0..n_iterations {
-        population.next_generation(&mut rng, &settings);
+        population.next_generation_par(&mut rng, &settings);
         if population.generation % 20 == 0 {
             describe_population_demographics(&population);
         }
@@ -247,6 +248,7 @@ fn test_tictactoe() {
         if population.generation % 20 == 0 {
             describe_population_fitness(&population);
         }
+
         // fn is_sorted<T: Ord>(vec: &Vec<T>) -> bool {
         //     vec.windows(2).all(|w| w[0] <= w[1])
         // }
@@ -269,7 +271,7 @@ fn test_tictactoe() {
         
     }
 
-    let app_state = ApplicationState{population: population.clone(), rng};
+    let app_state = ApplicationState{population: population.clone(), rng, settings};
     let app_state_msgpack = to_vec(&app_state).unwrap();
     let mut file = File::create("app.mpk").unwrap();
     file.write_all(&app_state_msgpack).unwrap();
@@ -296,14 +298,7 @@ fn resume_test_from_file() {
     let file = File::open("app.mpk").unwrap();
     let app_state: ApplicationState = rmp_serde::from_read(file).unwrap();
 
-    let mut settings = Settings::standard(10, 9);
-    settings.n_organisms = 200 * 16;
-    settings.n_species_max = 200;
-    settings.n_species_min = 5;
-    settings.mutate_weight_rate = 0.1;
-    settings.mutate_weight_scale = 0.1;
-    settings.mutate_add_connection_rate = 0.03;
-    settings.mutate_add_node_rate = 0.05;
+    let mut settings = app_state.settings;
 
     let mut evaluator = TicTacToeEvaluator;
 
@@ -312,14 +307,18 @@ fn resume_test_from_file() {
     let mut species_stats = Vec::with_capacity(1001);
 
     let mut rng = app_state.rng;
+    
+    population.organisms.iter_mut().for_each(|o| o.trim_genome());
+
     for _ in 0..1000 {
-        population.next_generation(&mut rng, &settings);
+        population.next_generation_par(&mut rng, &settings);
         if population.generation % 20 == 0 {
             println!("generation: {:?}", population.generation);
             describe_population_demographics(&population);
         }
         
         population.evaluate_two_player(&mut evaluator);
+
         if population.generation % 20 == 0 {
             describe_population_fitness(&population);
         }
@@ -328,7 +327,7 @@ fn resume_test_from_file() {
         
     }
 
-    let app_state = ApplicationState{population: population.clone(), rng};
+    let app_state = ApplicationState{population: population.clone(), rng, settings};
     let app_state_msgpack = to_vec(&app_state).unwrap();
     let mut file = File::create("app.mpk").unwrap();
     file.write_all(&app_state_msgpack).unwrap();
@@ -337,7 +336,7 @@ fn resume_test_from_file() {
     let mut file = File::create("species_stats.mpk").unwrap();
     file.write_all(&species_stats_msgpack).unwrap();
 
-    // print_best_genome(&population);
+    print_best_genome(&population);
     let best_genome = 
         population.species.iter()
         .map(|s| &population.organisms[s.champion])

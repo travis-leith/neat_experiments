@@ -1,3 +1,6 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
 pub struct Settings {
     pub excess_coefficient: f64,
     pub disjoint_coefficient: f64,

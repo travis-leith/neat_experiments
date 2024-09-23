@@ -249,7 +249,10 @@ impl Genome {
                 let gene_key = GeneKey{in_node_id, out_node_id};
                 if !self.data.contains_key(&gene_key) {
                     self.add_connection(in_node_id, out_node_id, rng.gen_range(-1.0..1.0));
-                } //TODO else mutate weight
+                } else {
+                    let gene_value = self.data.get_mut(&gene_key).unwrap();
+                    gene_value.enabled = true;
+                }
             }
         }
     }
@@ -335,6 +338,8 @@ pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: usize, 
 
 #[cfg(test)]
 mod tests {
+    use crate::neat::organism::Organism;
+    use assert_approx_eq::assert_approx_eq;
     use super::*;
     fn genome_sample_1() -> Genome{
         Genome::create(vec![
@@ -373,5 +378,38 @@ mod tests {
         genome.add_node(GeneIndex(0));
         assert_eq!(genome.len(), 7);
     }
+
+    fn genome_sample_feed_forward_1() -> Genome{
+        Genome::create(vec![
+            Gene::create(0, 4, -0.1, true),
+            Gene::create(4, 3, 0.6, true),
+            Gene::create(1, 5, -0.8, true),
+            Gene::create(5, 3, -0.9, true),
+            Gene::create(0, 5, 0.6, true),
+            Gene::create(5, 2, 0.4, true),
+        ], 2, 2)
+    }
+    
+    #[test]
+    fn test_genome_add_connection_stable_activation() {
+        //demonstrate that adding nodes does not change the activation value
+        //this phenomenon depends on activation function and incoming values
+        let genome = genome_sample_feed_forward_1();
+        let mut organism =  Organism::create_from_genome(genome);
+        organism.phenome.print_mermaid_graph();
+        let output = organism.activate(&vec![0.5, -0.2]);
+        assert_approx_eq!(output[0], 0.184);
+        assert_approx_eq!(output[1], 0.);
+
+        let mut genome2 = genome_sample_feed_forward_1();
+        genome2.add_node(GeneIndex(4));
+
+        let mut organism2 =  Organism::create_from_genome(genome2);
+        organism2.phenome.print_mermaid_graph();
+        let output2 = organism2.activate(&vec![0.5, -0.2]);
+        assert_approx_eq!(output2[0], 0.184);
+        assert_approx_eq!(output2[1], 0.);
+    }
+    
 
 }

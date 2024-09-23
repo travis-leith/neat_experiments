@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use super::{common::Settings, genome::{self, Genome}, organism::{Organism, OrganismIndex, Organisms}};
 use itertools::Itertools;
 use rand::{Rng, RngCore, SeedableRng};
@@ -243,13 +245,14 @@ impl Population {
     
         // Initialize a vector of seeds from the incoming R
         let seeds: Vec<_> = (0..self.species.len()).map(|_| rng.gen()).collect();
+
+        let new_population = Mutex::new(Vec::with_capacity(settings.n_organisms + settings.n_species_max));
     
         // Zip the seeds with the species iterator
-        let new_population: Vec<Organism> = 
-            self.species
+        self.species
             .par_iter_mut()
             .enumerate()
-            .map(|(i, s)| {
+            .for_each(|(i, s)| {
                 
                 let mut local_rng = Xoshiro256PlusPlus::seed_from_u64(seeds[i]);
                 let mut local_new_population = Vec::new();
@@ -257,7 +260,7 @@ impl Population {
                 let n_offspring = offspring_per_species[i];
                 s.members.sort_by_key(|&org_index| -(self.organisms[org_index].fitness as i64));
                 let n_members = s.members.len();
-                let n_breeders = (n_members as f64 * 0.4).ceil() as usize;
+                let n_breeders = (n_members as f64 * 0.3).ceil() as usize;
                 for _ in 0..n_offspring {
                     let parent_1_index = s.members[local_rng.gen_range(0..n_breeders)];
                     let parent_2_index = s.members[local_rng.gen_range(0..n_breeders)];
@@ -274,16 +277,15 @@ impl Population {
                     local_new_population.push(champion);
                 }
     
-                local_new_population
-            })
-            .flatten()
-            .collect();
+                let mut new_population = new_population.lock().unwrap();
+                new_population.extend(local_new_population);
+            });
     
-        self.organisms = Organisms::new(new_population);
+        self.organisms = Organisms::new(new_population.into_inner().unwrap());
         self.speciate(rng, settings);
     }
 
-    pub fn next_generation<R: RngCore>(&mut self, rng: &mut R, settings: &Settings) {
+    pub fn next_generation_dep<R: RngCore>(&mut self, rng: &mut R, settings: &Settings) {
         self.generation += 1;
         let mut new_population = Vec::new();
         

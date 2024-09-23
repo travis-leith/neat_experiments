@@ -8,10 +8,9 @@ use itertools::Itertools;
 use super::genome::Genome;
 use super::genome::NodeId;
 
-#[derive(PartialEq, Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum NodeType{
     Sensor,
-    #[default] //TODO is a default really needed here?
     Hidden,
     Output,
 }
@@ -431,6 +430,7 @@ mod tests {
             println!("");
         }
     }
-    //TODO demonstrate that adding nodes does not change the activation value
+    
+    
     
 }
