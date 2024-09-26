@@ -70,7 +70,7 @@ fn main() {
     let mut settings = Settings::standard(3, 1);
     settings.n_organisms = 1000;
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(2);
     let mut population = Population::init(&mut rng, &settings);
 
     let mut evaluator = XorEvaluator;
@@ -78,7 +78,7 @@ fn main() {
     describe_population_demographics(&population);
     population.evaluate(&mut evaluator, true);        
     describe_population_fitness(&population);
-
+    // std::env::set_var("RAYON_NUM_THREADS", "1");
     for _ in 0..5000 {
         population.next_generation_par(&mut rng, &settings);
         describe_population_demographics(&population);

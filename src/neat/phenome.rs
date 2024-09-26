@@ -232,7 +232,7 @@ fn get_activation_order(nodes: &NodeMap, edges: &[Edge], outputs: &[NodeIndex]) 
 
         loop_count += 1;
         if loop_count >= 16383 {
-            break;
+            panic!("loop count exceeded");
         }
     }
 
@@ -265,7 +265,7 @@ impl Phenome {
         let mut edges = Vec::with_capacity(genome.len());
 
         for (gene_key, gene_val) in genome.iter() {
-            if gene_val.enabled {
+            // if gene_val.enabled {
                 let in_node_id = gene_key.in_node_id;
                 let out_node_id = gene_key.out_node_id;
                 let weight = gene_val.weight;
@@ -274,7 +274,7 @@ impl Phenome {
                 let out_node_index = nodes.get_or_create_node_index(genome, out_node_id);
 
                 edges.push(Edge{source: in_node_index, target: out_node_index, weight});
-            }
+            // }
         }
 
         for (i, edge) in edges.iter().enumerate() {
@@ -404,16 +404,16 @@ mod tests {
         use crate::neat::{genome::{Gene, GeneExt, Genome}, phenome::Phenome};
         let genome = 
             Genome::create(vec![
-                Gene::create(0, 4, 0.0, true),
-                Gene::create(4, 2, 0.0, true),
-                Gene::create(7, 6, 0.0, true),
-                Gene::create(4, 6, 0.0, true),
-                Gene::create(4, 8, 0.0, true),
-                Gene::create(6, 5, 0.0, true),
-                Gene::create(5, 4, 0.0, true),
-                Gene::create(1, 5, 0.0, true),
-                Gene::create(5, 3, 0.0, true),
-                Gene::create(9, 7, 0.0, true),
+                Gene::create(0, 4, 0.0),
+                Gene::create(4, 2, 0.0),
+                Gene::create(7, 6, 0.0),
+                Gene::create(4, 6, 0.0),
+                Gene::create(4, 8, 0.0),
+                Gene::create(6, 5, 0.0),
+                Gene::create(5, 4, 0.0),
+                Gene::create(1, 5, 0.0),
+                Gene::create(5, 3, 0.0),
+                Gene::create(9, 7, 0.0),
                 
             ], 2, 2);
 

@@ -11,7 +11,6 @@ mod tictactoe;
 use serde::{Serialize, Deserialize};
 use tictactoe::{cli::get_user_move, game::*};
 use rand::SeedableRng;
-// use rand::seq::SliceRandom;
 use neat_experiments::neat::population::Population;
 
 impl Player {
@@ -30,11 +29,13 @@ impl Cell {
     }
 }
 
-
-
 impl GameBoard {
     fn as_sensor_values(&self, perspective_of: &Player) -> Vec<f64> {
         self.cells.into_iter().map(|c|c.as_f64(perspective_of)).collect_vec()
+    }
+
+    pub fn move_count(&self, player: Player) -> usize {
+        self.cells.iter().filter(|cell| cell.0 == Some(player)).count()
     }
 }
 
@@ -87,24 +88,24 @@ impl Controller for NeatVsNeat<'_> {
 fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
     let mut ctrl = NeatVsNeat{cross: org1, circle: org2};
     match play_game(&mut ctrl, new_game(Player::Cross)) {
-        Ok((_, gameover_state)) => {
+        Ok((game_board, gameover_state)) => {
             match gameover_state {
                 GameOverState::Tied => {
-                    ctrl.circle.fitness += 2;
-                    ctrl.cross.fitness += 2;
+                    ctrl.circle.fitness += 3;
+                    ctrl.cross.fitness += 3;
                 },
                 GameOverState::Won(player) => {
                     match player {
                         Player::Circle => {
-                            ctrl.circle.fitness += 4;
-                            // ctrl.cross.fitness -= 1;
+                            let cross_count = game_board.move_count(Player::Cross);
+                            ctrl.circle.fitness += cross_count;
                             if ctrl.cross.fitness > 0 {
                                 ctrl.cross.fitness -= 1;
                             }
                         },
                         Player::Cross => {
-                            // ctrl.circle.fitness -= 1;
-                            ctrl.cross.fitness += 3;
+                            let circle_count = game_board.move_count(Player::Circle);
+                            ctrl.cross.fitness += circle_count;
                             if ctrl.circle.fitness > 0 {
                                 ctrl.circle.fitness -= 1;
                             }
@@ -299,6 +300,8 @@ fn resume_test_from_file() {
     let app_state: ApplicationState = rmp_serde::from_read(file).unwrap();
 
     let mut settings = app_state.settings;
+    settings.excess_coefficient = 0.5;
+    settings.disjoint_coefficient = 0.5;
 
     let mut evaluator = TicTacToeEvaluator;
 
@@ -308,9 +311,9 @@ fn resume_test_from_file() {
 
     let mut rng = app_state.rng;
     
-    population.organisms.iter_mut().for_each(|o| o.trim_genome());
+    // population.organisms.iter_mut().for_each(|o| o.trim_genome());
 
-    for _ in 0..1000 {
+    for _ in 0..3000 {
         population.next_generation_par(&mut rng, &settings);
         if population.generation % 20 == 0 {
             println!("generation: {:?}", population.generation);

@@ -1,18 +1,19 @@
 use itertools::Itertools;
-use rand::{seq::SliceRandom, Rng, RngCore};
+use rand::{seq::{IteratorRandom, SliceRandom}, Rng, RngCore};
 use rand_distr::{Distribution, Normal, Uniform};
-use indexmap::IndexMap;
-use rustc_hash::FxBuildHasher;
+use indexmap::{Equivalent, IndexMap, IndexSet};
+use rustc_hash::{FxBuildHasher, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
+type FxIndexSet<T> = IndexSet<T, FxBuildHasher>;
 
 use crate::neat::vector::{AllignedTuplePair, allign_indexmap_map, allign_indexmap_iter};
 
 use super::common::Settings;
 
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
-pub struct GeneIndex(pub usize);
+// #[derive(PartialEq, PartialOrd, Clone, Copy)]
+// pub struct GeneIndex(pub usize);
 
 #[derive(PartialEq, PartialOrd, Ord, Clone, Copy, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub usize);
@@ -20,6 +21,12 @@ pub struct NodeId(pub usize);
 impl NodeId {
     pub fn inc(self) -> NodeId {
         NodeId(self.0 + 1)
+    }
+}
+
+impl Equivalent<NodeId> for &NodeId {
+    fn equivalent(&self, key: &NodeId) -> bool {
+        self.0 == key.0
     }
 }
 
@@ -32,14 +39,14 @@ pub struct GeneKey {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct GeneValue {
     pub weight: f64,
-    pub enabled: bool
+    // pub enabled: bool
 }
 
 impl GeneValue {
-    pub fn create(weight: f64, enabled: bool) -> GeneValue {
+    pub fn create(weight: f64) -> GeneValue {
         GeneValue {
             weight,
-            enabled,
+            // enabled,
         }
     }
 }
@@ -47,17 +54,17 @@ impl GeneValue {
 pub type Gene = (GeneKey, GeneValue);
 
 pub trait GeneExt {
-    fn create(in_node_id: usize, out_node_id: usize, weight: f64, enabled: bool) -> Self;
+    fn create(in_node_id: usize, out_node_id: usize, weight: f64) -> Self;
 }
 
 impl GeneExt for Gene {
-    fn create(in_node_id: usize, out_node_id: usize, weight: f64, enabled: bool) -> Gene {
+    fn create(in_node_id: usize, out_node_id: usize, weight: f64) -> Gene {
         (
             GeneKey {
                 in_node_id: NodeId(in_node_id),
                 out_node_id: NodeId(out_node_id),
             },
-            GeneValue::create(weight, enabled),
+            GeneValue::create(weight),
         )
     }
 }
@@ -65,8 +72,9 @@ impl GeneExt for Gene {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Genome{
     pub data: FxIndexMap<GeneKey, GeneValue>,
-    next_node_id: NodeId,
-    pub distinct_node_ids: Vec<NodeId>,
+    next_fresh_node_id: NodeId,
+    unused_node_ids: FxIndexSet<NodeId>,
+    pub distinct_node_ids: FxIndexMap<NodeId, usize>,
     pub n_sensor_nodes: usize,
     pub n_output_nodes: usize,
 }
@@ -76,19 +84,46 @@ impl Genome {
         self.data.iter()
     }
 
+    fn next_node_id(&mut self) -> NodeId {
+        if let Some(node_id) = self.unused_node_ids.pop() {
+            // println!("Reusing node id: {:?}", node_id.0);
+            node_id
+        } else {
+            // println!("Creating new node id");
+            let node_id = self.next_fresh_node_id;
+            self.next_fresh_node_id = self.next_fresh_node_id.inc();
+            node_id
+        }
+    }
+
+    //TODO this function is only used in tests. Move it somewhere else
     pub fn create(genes: Vec<Gene>, n_sensor_nodes: usize, n_output_nodes: usize) -> Genome {
-        let distinct_node_ids = 
+        let distinct_node_ids: FxIndexMap<NodeId, usize>= 
             genes.iter()
             .flat_map(|(gene_key, _)| vec![gene_key.in_node_id, gene_key.out_node_id])
-            .unique()
-            .sorted()
-            .collect_vec();
-        let max_node_id = distinct_node_ids.iter().max().unwrap();
+            .chunk_by(|x| *x)
+            .into_iter()
+            .map(|(node_id, chunk)| (node_id, chunk.count()))
+            .collect();
+
+        let max_node_id = distinct_node_ids.keys().max().unwrap();
 
         let data = genes.into_iter().sorted_by_key(|x|x.0.clone()).collect();
-        let next_node_id = max_node_id.inc();
-        Genome{data, next_node_id, n_sensor_nodes, n_output_nodes, distinct_node_ids}
+        let next_fresh_node_id = max_node_id.inc();
+        let unused_node_ids = FxIndexSet::default();
+        Genome{data, next_fresh_node_id, unused_node_ids, n_sensor_nodes, n_output_nodes, distinct_node_ids}
     }
+
+    // fn validate_unused_node_ids(&self) {
+    //     for node_id in self.unused_node_ids.iter() {
+    //         match self.distinct_node_ids.get(node_id) {
+    //             Some(i) if *i > 0 => {
+    //                 println!("Unused node id is in distinct_node_ids");
+    //             },
+    //             _ => ()
+    //         }
+    //     }
+    // }
 
     pub fn init<R: RngCore>(rng: &mut R, n_sensor_nodes: usize, n_output_nodes: usize) -> Genome {
         let between = Uniform::from(-1.0..1.0);
@@ -96,40 +131,50 @@ impl Genome {
         let n_connections = n_sensor_nodes * n_output_nodes;
         let mut data = IndexMap::with_capacity_and_hasher(n_connections, FxBuildHasher);
 
+        let mut distinct_node_ids = FxIndexMap::default();
+
         for out_node_ind in 0..n_output_nodes {
             let out_node_id = out_node_ind + n_sensor_nodes;
             for in_node_ind in 0..n_sensor_nodes {
                 let in_node_id = in_node_ind;
-                let (gene_key, gene_val) = Gene::create(in_node_id, out_node_id, between.sample(rng), true);
+                let (gene_key, gene_val) = Gene::create(in_node_id, out_node_id, between.sample(rng));
                 data.insert(gene_key, gene_val);
+
+                *distinct_node_ids.entry(NodeId(in_node_id)).or_insert(0) += 1;
+                *distinct_node_ids.entry(NodeId(out_node_id)).or_insert(0) += 1;
             }
         }
 
-        let next_node_id = NodeId(n_sensor_nodes + n_output_nodes);
-        let distinct_node_ids = 
-            (0..next_node_id.0)
-            .map(|x| NodeId(x))
-            .sorted()
-            .collect();
-        Genome{data, next_node_id, n_sensor_nodes, n_output_nodes, distinct_node_ids}
+        //make sure distinct_node_ids is sorted
+        let mut distinct_node_vec: Vec<_> = distinct_node_ids.into_iter().collect();
+        distinct_node_vec.sort_by_key(|&(node_id, _)| node_id);
+        distinct_node_ids = distinct_node_vec.into_iter().collect();
+
+        let next_fresh_node_id = NodeId(n_sensor_nodes + n_output_nodes);
+        let unused_node_ids = FxIndexSet::default();
+        Genome{data, next_fresh_node_id, unused_node_ids, n_sensor_nodes, n_output_nodes, distinct_node_ids}
     }
 
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
-    pub fn get_index(&self, index: GeneIndex) -> (&GeneKey, &GeneValue) {
-        self.data.get_index(index.0).unwrap()
+    pub fn get_index(&self, index: usize) -> (&GeneKey, &GeneValue) {
+        self.data.get_index(index).unwrap()
     }
 
-    fn get_index_mut(&mut self, index: GeneIndex) -> (&GeneKey, &mut GeneValue) {
-        self.data.get_index_mut(index.0).unwrap()
+    fn get_index_mut(&mut self, index: usize) -> (&GeneKey, &mut GeneValue) {
+        self.data.get_index_mut(index).unwrap()
     }
 
     pub fn add_connection(&mut self, in_node_id: NodeId, out_node_id: NodeId, weight: f64) {
+        // if in_node_id == out_node_id {
+        //     println!("Tried to add a connection where input is the same node as output");
+        // }
         debug_assert!(in_node_id != out_node_id, "Tried to add a connection where input is the same node as output");
-        debug_assert!(in_node_id < self.next_node_id, "Tried to add a connection with an input node that does not exist");
-        debug_assert!(out_node_id < self.next_node_id, "Tried to add a connection with an output node that does not exist");
+        // if out_node_id.0 < self.n_sensor_nodes {
+        //     println!("Tried to add a connection with an output node that is a sensor node");
+        // }
         debug_assert!(out_node_id.0 >= self.n_sensor_nodes, "Tried to add a connection with an output node that is a sensor node");
 
         let gene_key = GeneKey {
@@ -137,25 +182,67 @@ impl Genome {
             out_node_id
         };
 
-        let gene_value = GeneValue::create(weight, true);
+        //increment node counts
+        *self.distinct_node_ids.entry(in_node_id).or_insert(0) += 1;
+        *self.distinct_node_ids.entry(out_node_id).or_insert(0) += 1;
+        
+        let gene_value = GeneValue::create(weight);
         let insertion_result = self.data.insert(gene_key, gene_value);
         debug_assert!(insertion_result.is_none(), "Tried to add a connection that already exists");
     }
 
-    pub fn add_node(&mut self, existing_conn_index: GeneIndex) {
+    fn remove_connection(&mut self, gene_index: usize) {
+        // let (gene_key, _) = self.get_index(gene_index).clone();
+        let gene_key = self.data.keys().nth(gene_index).unwrap().clone();
+        self.data.swap_remove_index(gene_index);
+
+        //decrement node counts
+        match self.distinct_node_ids.get_mut(&gene_key.in_node_id) {
+            Some(count) => {
+                *count -= 1;
+                if *count == 0 {
+                    // self.distinct_node_ids.swap_remove(&gene_key.in_node_id);
+                    self.unused_node_ids.insert(gene_key.in_node_id);
+                    // self.validate_unused_node_ids();
+                }
+            },
+            None => panic!("Tried to remove a connection with an input node that does not exist")
+        }
+        match self.distinct_node_ids.get_mut(&gene_key.out_node_id) {
+            Some(count) => {
+                *count -= 1;
+                if *count == 0 {
+                    // self.distinct_node_ids.swap_remove(&gene_key.out_node_id);
+                    self.unused_node_ids.insert(gene_key.out_node_id);
+                    // self.validate_unused_node_ids();
+                }
+            },
+            None => panic!("Tried to remove a connection with an output node that does not exist")
+        }
+    }
+
+    pub fn add_node(&mut self, existing_conn_index: usize) {
         let (gene_key, gene_val) = {
             let (gene_key, gene_val) = self.get_index_mut(existing_conn_index);
             let cloned_pair = (gene_key.clone(), gene_val.clone());
-            gene_val.enabled = false;
+            // gene_val.enabled = false;
+            
             cloned_pair
         };
     
-        if gene_val.enabled {
-            let new_node_id = self.next_node_id;
-            self.next_node_id = self.next_node_id.inc();
+        // if gene_val.enabled {
+            let new_node_id = self.next_node_id();
+            if new_node_id == gene_key.in_node_id || new_node_id == gene_key.out_node_id {
+                println!("Tried to add a node where the new node is the same as either the input or output node");
+
+            }
+
+            // self.validate_unused_node_ids();
+
             self.add_connection(gene_key.in_node_id, new_node_id, 1.);
             self.add_connection(new_node_id, gene_key.out_node_id, gene_val.weight);
-        }    
+            self.remove_connection(existing_conn_index);
+        // }    
     }
 
     pub fn distance(&self, other: &Genome, excess_coef: f64, disjoint_coef: f64, weight_diff_coef: f64) -> f64 {
@@ -240,18 +327,21 @@ impl Genome {
         self.mutate_toggle_connection(rng, &between, settings);
     }
 
+    
     fn mutate_add_connection<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, settings: &Settings) {
         let r = between.sample(rng);
         if r < settings.mutate_add_connection_rate {
-            let &in_node_id = self.distinct_node_ids.choose(rng).unwrap();            
-            let &out_node_id = self.distinct_node_ids[self.n_sensor_nodes ..].choose(rng).unwrap();
-            if in_node_id != out_node_id {
-                let gene_key = GeneKey{in_node_id, out_node_id};
-                if !self.data.contains_key(&gene_key) {
-                    self.add_connection(in_node_id, out_node_id, rng.gen_range(-1.0..1.0));
-                } else {
-                    let gene_value = self.data.get_mut(&gene_key).unwrap();
-                    gene_value.enabled = true;
+            let &in_node_id = self.distinct_node_ids.keys().choose(rng).unwrap();            
+            let &out_node_id = self.distinct_node_ids.keys().choose(rng).unwrap();
+            if out_node_id.0 >= self.n_sensor_nodes {
+                if in_node_id != out_node_id {
+                    let gene_key = GeneKey{in_node_id, out_node_id};
+                    if !self.data.contains_key(&gene_key) {
+                        self.add_connection(in_node_id, out_node_id, rng.gen_range(-1.0..1.0));
+                    } else {
+                        let gene_value = self.data.get_mut(&gene_key).unwrap();
+                        // gene_value.enabled = true; //TODO what should happen here?
+                    }
                 }
             }
         }
@@ -260,7 +350,7 @@ impl Genome {
     fn mutate_add_node<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, settings: &Settings) {
         let r = between.sample(rng);
         if r < settings.mutate_add_node_rate {
-            let gene_index = GeneIndex(rng.gen_range(0..self.len()));
+            let gene_index = rng.gen_range(0..self.len());
             self.add_node(gene_index);
         }
     }
@@ -279,9 +369,15 @@ impl Genome {
     fn mutate_toggle_connection<R: RngCore>(&mut self, rng: &mut R, between:&Uniform<f64>, settings: &Settings) {
         let r = between.sample(rng);
         if r < settings.mutate_toggle_connection_rate {
-            let gene_index = GeneIndex(rng.gen_range(0..self.len()));
-            let (_, gene_value) = self.get_index_mut(gene_index);
-            gene_value.enabled = !gene_value.enabled;
+            let gene_index = rng.gen_range(0..self.len());
+            let n_sensors = self.n_sensor_nodes;
+            let n_output = self.n_output_nodes;
+            let (gene_key, gene_val) = self.get_index_mut(gene_index);
+            if gene_key.in_node_id.0 < n_sensors || gene_key.out_node_id.0 < n_sensors + n_output {
+                gene_val.weight = 0.;
+            } else {
+                self.remove_connection(gene_index);
+            }
         }
     }
 }
@@ -326,13 +422,32 @@ pub fn cross_over<R: RngCore>(rng: &mut R, genome_1: &Genome, fitness_1: usize, 
 
     let get_id = |gene: (&GeneKey, &GeneValue)| gene.0.clone();
     let new_genome_data = allign_indexmap_map(&genome_1.data, &genome_2.data, &get_id, &mut choose_gene);
-    let new_next_node_id = NodeId(std::cmp::max(genome_1.next_node_id.0, genome_2.next_node_id.0));
-    let distinct_node_ids = 
+    let new_next_fresh_node_id = NodeId(std::cmp::max(genome_1.next_fresh_node_id.0, genome_2.next_fresh_node_id.0));
+    let distinct_node_ids: FxIndexMap<NodeId, usize> = 
         new_genome_data.iter()
         .flat_map(|(gene_key, _)| vec![gene_key.in_node_id, gene_key.out_node_id])
-        .sorted()
-        .unique().collect_vec();
-    Genome{data: new_genome_data, next_node_id: new_next_node_id, n_sensor_nodes:genome_1.n_sensor_nodes, n_output_nodes:genome_1.n_output_nodes, distinct_node_ids}
+        .chunk_by(|x| *x)
+        .into_iter()
+        .map(|(node_id, chunk)| (node_id, chunk.count()))
+        .collect();
+    let unused_union = genome_1.unused_node_ids.union(&genome_2.unused_node_ids).cloned().collect_vec();
+    let unused_nodes_id = unused_union.iter().filter(|node_id| {
+        match distinct_node_ids.get(node_id) {
+            Some(i) if *i > 0 => false,
+            _ => true,
+        }
+    }).cloned().collect();
+    
+    let res = Genome{
+        data: new_genome_data,
+        next_fresh_node_id: new_next_fresh_node_id,
+        unused_node_ids: unused_nodes_id,
+        n_sensor_nodes:genome_1.n_sensor_nodes,
+        n_output_nodes:genome_1.n_output_nodes,
+        distinct_node_ids
+    };
+    // res.validate_unused_node_ids();
+    res
 }
 
 
@@ -343,25 +458,25 @@ mod tests {
     use super::*;
     fn genome_sample_1() -> Genome{
         Genome::create(vec![
-            Gene::create(0, 3, 0.0, true),
-            Gene::create(1, 3, 0.0, true),
-            Gene::create(1, 4, 0.0, true),
-            Gene::create(2, 4, 0.0, true),
-            Gene::create(3, 4, 0.0, true),
+            Gene::create(0, 3, 0.0),
+            Gene::create(1, 3, 0.0),
+            Gene::create(1, 4, 0.0),
+            Gene::create(2, 4, 0.0),
+            Gene::create(3, 4, 0.0),
         ], 2, 2)
     } 
     
     #[test]
     fn test_genome_max_node_id() {
         let genome = genome_sample_1();
-        assert_eq!(genome.next_node_id.0, 5);
+        assert_eq!(genome.next_fresh_node_id.0, 5);
     }
 
     #[test]
     fn test_genome_init() {
         let mut rng = rand::thread_rng();
         let genome = Genome::init(&mut rng, 2, 2);
-        assert_eq!(genome.next_node_id.0, 4);
+        assert_eq!(genome.next_fresh_node_id.0, 4);
         assert_eq!(genome.len(), 4);
     }
 
@@ -375,18 +490,18 @@ mod tests {
     #[test]
     fn test_genome_add_node() {
         let mut genome = genome_sample_1();
-        genome.add_node(GeneIndex(0));
+        genome.add_node(0);
         assert_eq!(genome.len(), 7);
     }
 
     fn genome_sample_feed_forward_1() -> Genome{
         Genome::create(vec![
-            Gene::create(0, 4, -0.1, true),
-            Gene::create(4, 3, 0.6, true),
-            Gene::create(1, 5, -0.8, true),
-            Gene::create(5, 3, -0.9, true),
-            Gene::create(0, 5, 0.6, true),
-            Gene::create(5, 2, 0.4, true),
+            Gene::create(0, 4, -0.1),
+            Gene::create(4, 3, 0.6),
+            Gene::create(1, 5, -0.8),
+            Gene::create(5, 3, -0.9),
+            Gene::create(0, 5, 0.6),
+            Gene::create(5, 2, 0.4),
         ], 2, 2)
     }
     
@@ -402,7 +517,7 @@ mod tests {
         assert_approx_eq!(output[1], 0.);
 
         let mut genome2 = genome_sample_feed_forward_1();
-        genome2.add_node(GeneIndex(4));
+        genome2.add_node(4);
 
         let mut organism2 =  Organism::create_from_genome(genome2);
         organism2.phenome.print_mermaid_graph();

@@ -327,14 +327,14 @@ impl Population {
         self.speciate(rng, settings)
     }
 
-    pub fn trim_genomes(&mut self) {
-        for s in self.species.iter_mut() {
-            for &org_index in &s.members {
-                let org = &mut self.organisms[org_index];
-                org.trim_genome();
-            }
-        }
-    }
+    // pub fn trim_genomes(&mut self) {
+    //     for s in self.species.iter_mut() {
+    //         for &org_index in &s.members {
+    //             let org = &mut self.organisms[org_index];
+    //             org.trim_genome();
+    //         }
+    //     }
+    // }
 
 }
 

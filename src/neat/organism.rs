@@ -43,20 +43,20 @@ impl Organism {
         self.phenome.clear_values();
     }
 
-    pub fn trim_genome(&mut self) {
-        let distinct_gene_keys : FxHashSet<GeneKey> = 
-            self.phenome.activation_order.iter().flat_map(|(out_node_index, inputs)| {
-                let out_node_id = self.phenome.nodes[*out_node_index].id;
-            inputs.iter().map(|(in_node_index, _)| {
-                let in_node_id = self.phenome.nodes[*in_node_index].id;
-                GeneKey{in_node_id, out_node_id}
-            }).collect_vec()
-        }).collect();
+    // pub fn trim_genome(&mut self) {
+    //     let distinct_gene_keys : FxHashSet<GeneKey> = 
+    //         self.phenome.activation_order.iter().flat_map(|(out_node_index, inputs)| {
+    //             let out_node_id = self.phenome.nodes[*out_node_index].id;
+    //         inputs.iter().map(|(in_node_index, _)| {
+    //             let in_node_id = self.phenome.nodes[*in_node_index].id;
+    //             GeneKey{in_node_id, out_node_id}
+    //         }).collect_vec()
+    //     }).collect();
 
-        self.genome.data.retain(|gene_key, _| distinct_gene_keys.contains(&gene_key));
-        self.phenome = Phenome::create_from_genome(&self.genome);
+    //     self.genome.data.retain(|gene_key, _| distinct_gene_keys.contains(&gene_key));
+    //     self.phenome = Phenome::create_from_genome(&self.genome);
 
-    }
+    // }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -126,24 +126,24 @@ mod tests {
 
     fn genome_sample_feed_forward_1() -> Genome{
         Genome::create(vec![
-            Gene::create(0, 4, -0.1, true),
-            Gene::create(4, 3, 0.6, true),
-            Gene::create(1, 5, -0.8, true),
-            Gene::create(5, 3, -0.9, true),
-            Gene::create(0, 5, 0.6, true),
-            Gene::create(5, 2, 0.4, true),
+            Gene::create(0, 4, -0.1),
+            Gene::create(4, 3, 0.6),
+            Gene::create(1, 5, -0.8),
+            Gene::create(5, 3, -0.9),
+            Gene::create(0, 5, 0.6),
+            Gene::create(5, 2, 0.4),
         ], 2, 2)
     }
 
     fn genome_sample_recurrent_1() -> Genome{
         Genome::create(vec![
-            Gene::create(3, 2, 0.9, true),
-            Gene::create(1, 4, -0.8, true),
-            Gene::create(4, 3, 0.1, true),
-            Gene::create(5, 2, -0.4, true),
-            Gene::create(0, 4, -0.8, true),
-            Gene::create(3, 5, 0.5, true),
-            Gene::create(5, 4, -0.1, true),
+            Gene::create(3, 2, 0.9),
+            Gene::create(1, 4, -0.8),
+            Gene::create(4, 3, 0.1),
+            Gene::create(5, 2, -0.4),
+            Gene::create(0, 4, -0.8),
+            Gene::create(3, 5, 0.5),
+            Gene::create(5, 4, -0.1),
         ], 2, 1)
     }
 
