@@ -95,10 +95,10 @@ fn maybe_get_user_move() -> Option<CellLocation> {
 use crossterm::{execute, terminal::{Clear, ClearType}};
 
 fn clear_screen() {
-    match execute!(stdout(), Clear(ClearType::Purge)) {
-        Ok(_) => (),
-        Err(e) => eprintln!("Error clearing screen: {e}")
-    }
+    // match execute!(stdout(), Clear(ClearType::Purge)) {
+    //     Ok(_) => (),
+    //     Err(e) => eprintln!("Error clearing screen: {e}")
+    // }
 }
 
 pub fn get_user_move(gameboard: &GameBoard) -> CellLocation {

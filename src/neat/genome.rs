@@ -74,7 +74,7 @@ pub struct Genome{
     pub data: FxIndexMap<GeneKey, GeneValue>,
     next_fresh_node_id: NodeId,
     unused_node_ids: FxIndexSet<NodeId>,
-    pub distinct_node_ids: FxIndexMap<NodeId, usize>,
+    pub distinct_node_ids: FxIndexMap<NodeId, usize>, //maps a node id to the number of times it has been used
     pub n_sensor_nodes: usize,
     pub n_output_nodes: usize,
 }
@@ -312,7 +312,7 @@ impl Genome {
         let get_id = |gene: (&GeneKey, &GeneValue)| gene.0.clone();
         allign_indexmap_iter(&self.data, &other.data, &get_id, &mut increment_counters);
 
-        let n = std::cmp::max(n1, n2) as f64;
+        let n = (n1 + n2) as f64 / 2.;
         let excess_term = excess_coef * (excess_count as f64) / n;
         let disjoint_term = disjoint_coef * (disjoint_count as f64) / n;
         let weight_term = weight_diff_coef * total_weight_diff / n;

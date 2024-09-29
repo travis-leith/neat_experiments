@@ -98,14 +98,14 @@ fn single_match_up(org1: &mut Organism, org2: &mut Organism) {
                     match player {
                         Player::Circle => {
                             let cross_count = game_board.move_count(Player::Cross);
-                            ctrl.circle.fitness += cross_count;
+                            ctrl.circle.fitness += cross_count + 2;
                             if ctrl.cross.fitness > 0 {
                                 ctrl.cross.fitness -= 1;
                             }
                         },
                         Player::Cross => {
                             let circle_count = game_board.move_count(Player::Circle);
-                            ctrl.cross.fitness += circle_count;
+                            ctrl.cross.fitness += circle_count + 2;
                             if ctrl.circle.fitness > 0 {
                                 ctrl.circle.fitness -= 1;
                             }
@@ -215,13 +215,15 @@ struct ApplicationState {
 }
 fn test_tictactoe() {
     let mut settings = Settings::standard(10, 9);
-    settings.n_organisms = 200 * 16;
+    settings.n_organisms = 200 * 16 * 2;
     settings.n_species_max = 200;
     settings.n_species_min = 5;
     settings.mutate_weight_rate = 0.1;
     settings.mutate_weight_scale = 0.1;
     settings.mutate_add_connection_rate = 0.03;
     settings.mutate_add_node_rate = 0.05;
+    settings.excess_coefficient = 0.5;
+    settings.disjoint_coefficient = 0.5;
 
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(1234);
     
@@ -236,7 +238,7 @@ fn test_tictactoe() {
     describe_population_fitness(&population);
 
     println!("starting evolution");
-    let n_iterations = 1000;
+    let n_iterations = 3000;
     let mut species_stats = Vec::with_capacity(n_iterations + 1);
     species_stats.push(get_species_stats(&population));
     for _ in 0..n_iterations {
@@ -300,20 +302,21 @@ fn resume_test_from_file() {
     let app_state: ApplicationState = rmp_serde::from_read(file).unwrap();
 
     let mut settings = app_state.settings;
-    settings.excess_coefficient = 0.5;
-    settings.disjoint_coefficient = 0.5;
+    settings.excess_coefficient = 1.0;
+    settings.disjoint_coefficient = 1.0;
 
     let mut evaluator = TicTacToeEvaluator;
 
     let mut population = app_state.population;
 
-    let mut species_stats = Vec::with_capacity(1001);
+    let n_iterations = 10000;
+    let mut species_stats = Vec::with_capacity(n_iterations + 1);
 
     let mut rng = app_state.rng;
     
     // population.organisms.iter_mut().for_each(|o| o.trim_genome());
 
-    for _ in 0..3000 {
+    for _ in 0..n_iterations {
         population.next_generation_par(&mut rng, &settings);
         if population.generation % 20 == 0 {
             println!("generation: {:?}", population.generation);
@@ -339,7 +342,7 @@ fn resume_test_from_file() {
     let mut file = File::create("species_stats.mpk").unwrap();
     file.write_all(&species_stats_msgpack).unwrap();
 
-    print_best_genome(&population);
+    // print_best_genome(&population);
     let best_genome = 
         population.species.iter()
         .map(|s| &population.organisms[s.champion])
@@ -353,7 +356,7 @@ fn resume_test_from_file() {
 
 fn main() {
     //cargo run --release --example tictactoe_demo
-    test_tictactoe();
-    // resume_test_from_file();
+    // test_tictactoe();
+    resume_test_from_file();
 }
 

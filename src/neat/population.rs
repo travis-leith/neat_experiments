@@ -64,7 +64,7 @@ impl Population {
     }
 
     fn speciate<R: RngCore>(&mut self, rng: &mut R, settings: &Settings) {
-        let max_loops = 10;
+        let max_loops = 15;
         self.organisms.shuffle(rng);
         for _ in 0..max_loops {
             for s in self.species.iter_mut() {
@@ -77,10 +77,10 @@ impl Population {
 
             let n_non_empty_species = self.species.iter().filter(|s| !s.members.is_empty()).count();
             if n_non_empty_species < settings.n_species_min {
-                self.species_distance_threshold *= 0.88;
+                self.species_distance_threshold *= 0.94;
                 println!("gen: {}; n: {} - reducing species_distance_threshold to: {:.4}", self.generation, n_non_empty_species, self.species_distance_threshold);
             } else if n_non_empty_species > settings.n_species_max {
-                self.species_distance_threshold *= 1.1;
+                self.species_distance_threshold *= 1.05;
                 println!("gen: {}; n: {} - increasing species_distance_threshold to: {:.4}", self.generation, n_non_empty_species, self.species_distance_threshold);
             } else {
                 // println!("species_distance_threshold: {}", self.species_distance_threshold);
