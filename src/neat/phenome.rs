@@ -1,9 +1,14 @@
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::ops::Index;
 use std::ops::IndexMut;
+use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 use serde::{Serialize, Deserialize};
 use indexmap::IndexMap;
 use itertools::Itertools;
+
+use crate::neat::graph::tarjan_scc;
 
 use super::genome::Genome;
 use super::genome::NodeId;
@@ -282,6 +287,7 @@ impl Phenome {
         }
 
         //make sure sensor and output nodes are represented in the nodes map
+        //TODO this might be redundant given that all sensor and output related connections are retained and thus would be represented by the loop above
         for i in 0..genome.n_sensor_nodes + genome.n_output_nodes {
             nodes.get_or_create_node_index(genome, NodeId(i));
         }
@@ -295,7 +301,127 @@ impl Phenome {
         
         Phenome{nodes, edges, activation_order, inputs, outputs}
     }
-    
+
+    pub fn create_from_genome3(genome: &Genome) {
+        struct MapEntry {
+            inputs: Vec<(NodeId, f64)>,
+            outputs: Vec<(NodeId, f64)>
+        }
+
+        let mut node_map: FxHashMap<NodeId, MapEntry> = FxHashMap::default();
+
+        for (gene_key, gene_val) in genome.iter() {
+            let in_node_id = gene_key.in_node_id;
+            let out_node_id = gene_key.out_node_id;
+            let weight = gene_val.weight;
+
+            let entry = node_map.entry(out_node_id).or_insert(MapEntry{inputs: Vec::new(), outputs: Vec::new()});
+            entry.inputs.push((in_node_id, weight));
+
+            let entry = node_map.entry(in_node_id).or_insert(MapEntry{inputs: Vec::new(), outputs: Vec::new()});
+            entry.outputs.push((out_node_id, weight));
+        }
+
+        // Function to perform BFS and return all reachable nodes from a given set of start nodes
+        fn bfs_reachable(nodes: &FxHashMap<NodeId, MapEntry>, initial_nodes: &[NodeId], next_getter: impl Fn(&MapEntry) -> Vec<(NodeId, f64)>) -> FxHashSet<NodeId> {
+            let mut visited = FxHashSet::default();
+            let mut queue = VecDeque::new();
+
+            for &start in initial_nodes {
+                queue.push_back(start);
+                visited.insert(start);
+            }
+
+            while let Some(node_index) = queue.pop_front() {
+                let node_entry = nodes.get(&node_index).unwrap();
+                let next_nodes = next_getter(node_entry);
+                for (new_index, _) in next_nodes {
+                    if visited.insert(new_index) {
+                        queue.push_back(new_index);
+                    }
+                }
+            }
+
+            visited
+        }
+
+        let sensor_node_ids = (0..genome.n_sensor_nodes).map(NodeId).collect_vec();
+        let output_node_ids = (genome.n_sensor_nodes..genome.n_sensor_nodes + genome.n_output_nodes).map(NodeId).collect_vec();
+
+        let get_inputs = |entry: &MapEntry| entry.inputs.clone();
+        let get_outputs = |entry: &MapEntry| entry.outputs.clone();
+
+        let reachable_from_inputs = bfs_reachable(&node_map, &output_node_ids, get_inputs);
+        let reachable_to_outputs = bfs_reachable(&node_map, &sensor_node_ids, get_outputs);
+
+        let mut node_id_to_index: FxHashMap<NodeId, usize> = FxHashMap::default();
+        let mut node_ids: Vec<NodeId> = Vec::new();
+
+        for (index, node_id) in reachable_from_inputs.intersection(&reachable_to_outputs).cloned().enumerate() {
+            node_id_to_index.insert(node_id, index);
+            node_ids.push(node_id);
+        }
+
+        let enumerated_graph: Vec<Vec<(usize, f64)>> = 
+            node_ids.iter().map(|node_id| {
+                let entry = node_map.get(node_id).unwrap();
+                let inputs = entry.inputs.iter().filter_map(|(in_node_id, weight)| {
+                    match node_id_to_index.get(in_node_id) {
+                        Some(&in_index) => Some((in_index, *weight)),
+                        None => None
+                    }
+                }).collect_vec();
+                inputs
+            }).collect_vec();
+
+        let topo_order = tarjan_scc(&enumerated_graph);
+        let activation_order = topo_order.iter().flat_map(|component| {
+            component.iter().filter_map(|&node_index| {
+                let inputs = &enumerated_graph[node_index];
+                if !inputs.is_empty() {
+                    Some((node_index, inputs.clone()))
+                } else {
+                    None
+                }
+            })
+        }).collect_vec();
+
+        // println!("topo order: {:?}", topo_order);
+        // println!("enumerated graph: {:?}", enumerated_graph);
+        // println!("activation order: {:?}", activation_order);
+
+        println!("graph TD");
+
+        fn get_node_type(node_id: NodeId, genome: &Genome) -> NodeType {
+            if node_id.0 < genome.n_sensor_nodes {
+                NodeType::Sensor
+            } else if node_id.0 < genome.n_sensor_nodes + genome.n_output_nodes {
+                NodeType::Output
+            } else {
+                NodeType::Hidden
+            }
+        }
+
+        for (node_index, node_id) in node_ids.iter().enumerate() {
+            let node_type = match get_node_type(*node_id, genome) {
+                NodeType::Sensor => "S",
+                NodeType::Hidden => "H",
+                NodeType::Output => "O",
+            };
+            
+            println!("{}[{}:{}/{}]", node_index, node_index, node_id.0, node_type);
+        }
+
+        for component in topo_order {
+            for node_index in component {
+                let inputs = &enumerated_graph[node_index];
+                for (input_index, weight) in inputs {
+                    println!("{} -->|{:.4}|{}", input_index, weight, node_index);
+                }
+            }
+        }
+    }
+
     pub fn activate(&mut self, sensor_values: &[f64]) {
         fn relu(x: f64) -> f64 {
             if x > 0.0 {
@@ -376,6 +502,8 @@ impl Phenome {
             println!("{} -->|{:.4}|{}", edge.source.0, edge.weight, edge.target.0);
         }
     }
+
+    
 }
 
 impl Index<NodeIndex> for Phenome {
@@ -399,6 +527,8 @@ impl IndexMut<NodeIndex> for Phenome {
 }
 
 mod tests {
+    use crate::neat::phenome::NodeType;
+
     #[test]
     fn test_dead_ends() {
         use crate::neat::{genome::{Gene, GeneExt, Genome}, phenome::Phenome};
@@ -420,15 +550,9 @@ mod tests {
         let phenome =  Phenome::create_from_genome(&genome);
         phenome.print_full_mermaid_graph();
 
-        
-        println!("activation order");
-        for (k, v) in phenome.activation_order {
-            print!("{} <- ", k.0);
-            for (i, w) in &v {
-                print!("{}({:.4})", i.0, w);
-            }
-            println!("");
-        }
+        phenome.print_mermaid_graph();
+
+        Phenome::create_from_genome3(&genome);
     }
     
     

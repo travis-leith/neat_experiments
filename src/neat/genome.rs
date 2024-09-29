@@ -15,7 +15,7 @@ use super::common::Settings;
 // #[derive(PartialEq, PartialOrd, Clone, Copy)]
 // pub struct GeneIndex(pub usize);
 
-#[derive(PartialEq, PartialOrd, Ord, Clone, Copy, Eq, Hash, Serialize, Deserialize)]
+#[derive(PartialEq, PartialOrd, Ord, Clone, Copy, Eq, Hash, Serialize, Deserialize, Debug)]
 pub struct NodeId(pub usize);
 
 impl NodeId {

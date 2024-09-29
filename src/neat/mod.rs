@@ -4,3 +4,4 @@ pub mod phenome;
 pub mod organism;
 pub mod population;
 pub mod vector;
+pub mod graph;
