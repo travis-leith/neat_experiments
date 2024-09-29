@@ -351,25 +351,9 @@ fn resume_test_from_file() {
     tictactoe::cli::game_loop(&mut ai_controller);
 }
 
-fn analyse_latest_champ() {
-    let file = File::open("app.mpk").unwrap();
-    println!("loading application state");
-    let app_state: ApplicationState = rmp_serde::from_read(file).unwrap();
-    println!("application state loaded");
-    let population = app_state.population;
-    // print_best_genome(&population);
-    let best_org = 
-        population.species.iter()
-        .map(|s| &population.organisms[s.champion])
-        .max_by_key(|o| o.fitness).unwrap().clone();
-
-    Phenome::create_from_genome3(&best_org.genome);
-}
-
 fn main() {
     //cargo run --release --example tictactoe_demo
-    // test_tictactoe();
+    test_tictactoe();
     // resume_test_from_file();
-    analyse_latest_champ();
 }
 

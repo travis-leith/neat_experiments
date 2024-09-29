@@ -70,7 +70,7 @@ fn main() {
     let mut settings = Settings::standard(3, 1);
     settings.n_organisms = 1000;
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(2);
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(12345);
     let mut population = Population::init(&mut rng, &settings);
 
     let mut evaluator = XorEvaluator;

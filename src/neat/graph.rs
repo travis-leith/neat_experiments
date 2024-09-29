@@ -62,14 +62,12 @@ mod tests {
     use super::*;
 
     pub struct Graph {
-        n: usize,
         adj_list: Vec<Vec<(usize, f64)>>,
     }
     
     impl Graph {
         pub fn new(n: usize) -> Self {
             Self {
-                n,
                 adj_list: vec![vec![]; n],
             }
         }
