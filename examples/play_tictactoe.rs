@@ -1,3 +1,8 @@
 #![feature(explicit_tail_calls)]
 #![expect(incomplete_features)]
-pub mod neat;
+
+mod tictactoe;
+
+fn main() {
+    tictactoe::cli::game_loop();
+}

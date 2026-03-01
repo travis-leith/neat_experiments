@@ -1,45 +1,49 @@
-use std::io::{self, BufRead, stdout};
-use rand::seq::SliceRandom;
-use crate::tictactoe::game::*;
 use crate::tictactoe::display::board_to_string;
+use crate::tictactoe::game::*;
+use crossterm::{
+    execute,
+    terminal::{Clear, ClearType},
+};
+use rand::seq::SliceRandom;
+use std::io::{self, stdout, BufRead};
 
-pub fn get_random_move(gameboard: &GameBoard) -> CellLocation {
-    let make_move = |m:CellLocation| {
-        match gameboard.get_cell(m) {
-            Cell(None) => Some(m),
-            _ => None
-        }
-    };
+pub struct RandomAgent;
 
-    let possible_moves: [Option<CellLocation>; 9] = [
-        make_move(CellLocation::TopLft),
-        make_move(CellLocation::TopMid),
-        make_move(CellLocation::TopRgt),
-        make_move(CellLocation::MidLft),
-        make_move(CellLocation::MidMid),
-        make_move(CellLocation::MidRgt),
-        make_move(CellLocation::BotLft),
-        make_move(CellLocation::BotMid),
-        make_move(CellLocation::BotRgt),
-    ];
-
-    let possible_moves: Vec<CellLocation> = possible_moves.iter().flatten().cloned().collect();
-    let mut rng = rand::thread_rng();
-    possible_moves.choose(&mut rng).cloned().unwrap_or(CellLocation::BotLft)
+impl Agent for RandomAgent {
+    fn select_move(&mut self, state: &PlayingGameState) -> CellLocation {
+        let moves: Vec<_> = state.gameboard.available_moves().collect();
+        let mut rng = rand::thread_rng();
+        moves
+            .choose(&mut rng)
+            .copied()
+            .unwrap_or(CellLocation::MidMid)
+    }
 }
 
-fn get_valid_input_from_user<T>(f:fn() -> Option<T>) -> T {
+pub struct CliAgent;
+
+impl Agent for CliAgent {
+    fn select_move(&mut self, state: &PlayingGameState) -> CellLocation {
+        get_user_move(&state.gameboard)
+    }
+}
+
+fn get_valid_input_from_user<T>(f: impl Fn() -> Option<T>) -> T {
     loop {
         match f() {
             Some(result) => return result,
-            None => println!("You did not enter a valid response. Try again.")
+            None => println!("You did not enter a valid response. Try again."),
         }
     }
 }
 
 fn read_line_from_stdin() -> io::Result<String> {
     let stdin = io::stdin();
-    stdin.lock().lines().next().unwrap_or_else(|| Ok(String::new()))
+    stdin
+        .lock()
+        .lines()
+        .next()
+        .unwrap_or_else(|| Ok(String::new()))
 }
 
 fn get_yes_no_from_user(message: &str) -> Option<bool> {
@@ -47,31 +51,29 @@ fn get_yes_no_from_user(message: &str) -> Option<bool> {
     let line = read_line_from_stdin().unwrap_or_default();
 
     match line.to_lowercase().as_str() {
-        "yes" | "y"   => Some(true),
-        "no" | "n"   => Some(false),
-        _ => None
+        "yes" | "y" => Some(true),
+        "no" | "n" => Some(false),
+        _ => None,
     }
 }
 
 fn get_first_player_from_user() -> bool {
-    let f = || get_yes_no_from_user("Do you want to play first?");
-    get_valid_input_from_user(f)
+    get_valid_input_from_user(|| get_yes_no_from_user("Do you want to play first?"))
 }
 
-fn start_game() -> PlayingGameState {
-    let player_turn = 
-        if get_first_player_from_user() {
-            Player::Cross
-        } else {
-            Player::Circle
-        };
+fn start_game() -> (PlayingGameState, Player) {
+    // In this game, Cross always starts.
+    // The user choice determines marker ownership, not turn order directly.
+    let user_player = if get_first_player_from_user() {
+        Player::Cross
+    } else {
+        Player::Circle
+    };
 
-    // let gameboard = empty_game_board();
-    // PlayingGameState { gameboard, player_turn }
-    new_game(player_turn)
+    (new_game(Player::Cross), user_player)
 }
 
-fn string_to_player_move(s: String) -> Option<CellLocation> {
+fn string_to_player_move(s: &str) -> Option<CellLocation> {
     match s.to_lowercase().as_str() {
         "q" => Some(CellLocation::TopLft),
         "w" => Some(CellLocation::TopMid),
@@ -82,75 +84,75 @@ fn string_to_player_move(s: String) -> Option<CellLocation> {
         "z" => Some(CellLocation::BotLft),
         "x" => Some(CellLocation::BotMid),
         "c" => Some(CellLocation::BotRgt),
-        _   => None
+        _ => None,
     }
 }
 
 fn maybe_get_user_move() -> Option<CellLocation> {
     println!("Select move from qweasdzxc");
     let line = read_line_from_stdin().unwrap_or_default();
-
-    string_to_player_move(line)
+    string_to_player_move(&line)
 }
-use crossterm::{execute, terminal::{Clear, ClearType}};
 
 fn clear_screen() {
-    match execute!(stdout(), Clear(ClearType::Purge)) {
-        Ok(_) => (),
-        Err(e) => eprintln!("Error clearing screen: {e}")
-    }
+    let _ = execute!(stdout(), Clear(ClearType::Purge));
 }
 
 pub fn get_user_move(gameboard: &GameBoard) -> CellLocation {
-    
     clear_screen();
-    let s = board_to_string(gameboard);
-    println!("{s}");
-    let f = || maybe_get_user_move();
-    get_valid_input_from_user(f)
+    println!("{}", board_to_string(gameboard));
+    get_valid_input_from_user(maybe_get_user_move)
 }
 
 fn ask_user_for_new_game() -> bool {
-    let f = || get_yes_no_from_user("Do you want to play again?");
-    get_valid_input_from_user(f)
+    get_valid_input_from_user(|| get_yes_no_from_user("Do you want to play again?"))
 }
 
-fn end_game(gameboard: &GameBoard, game_over_state: &GameOverState) {
+fn end_game(gameboard: &GameBoard, game_over_state: &GameOverState, user_player: Player) {
     clear_screen();
-    let s = board_to_string(gameboard);
-    println!("{s}");
+    println!("{}", board_to_string(gameboard));
 
     match game_over_state {
         GameOverState::Tied => println!("No winners - game is tied!"),
-        GameOverState::Won(Player::Cross) => println!("User (you) have won!"),
-        GameOverState::Won(Player::Circle) => println!("AI has won!"),
-        GameOverState::Disqualified(Player::Cross, m) => println!("User (you) have tried to play an illegal move ({:?}) and are disqualified!", m),
-        GameOverState::Disqualified(Player::Circle, m) => println!("AI tried to play an illegal move ({:?}) and is disqualified!", m)
-    }
-}
-
-fn single_game_loop(ctrl: &mut impl Controller, mut playing_state: PlayingGameState) -> (GameBoard, GameOverState) {
-    loop {
-        match play_game( ctrl, playing_state) {
-            Ok(game_over_state) => 
-                break game_over_state,
-            Err(new_playing_state) => {
-                println!("you have entered an invalid move. Try again ...");
-                playing_state = new_playing_state;
+        GameOverState::Won(winner) => {
+            if *winner == user_player {
+                println!("User (you) have won!");
+            } else {
+                println!("AI has won!");
+            }
+        }
+        GameOverState::Disqualified(player, m) => {
+            if *player == user_player {
+                println!(
+                    "User (you) have tried to play an illegal move ({:?}) and are disqualified!",
+                    m
+                );
+            } else {
+                println!(
+                    "AI tried to play an illegal move ({:?}) and is disqualified!",
+                    m
+                );
             }
         }
     }
 }
 
-pub fn game_loop(ctrl: &mut impl Controller) {
-    loop {
-        let gamestate = start_game();
+pub fn game_loop() {
+    let mut cli_agent = CliAgent;
+    let mut ai_agent = RandomAgent;
 
-        let (gameboard, game_over_state) = single_game_loop(ctrl, gamestate);
-        end_game(&gameboard, &game_over_state);
+    loop {
+        let (initial_state, user_player) = start_game();
+
+        let (gameboard, game_over_state) = match user_player {
+            Player::Cross => play_game(&mut cli_agent, &mut ai_agent, initial_state),
+            Player::Circle => play_game(&mut ai_agent, &mut cli_agent, initial_state),
+        };
+
+        end_game(&gameboard, &game_over_state, user_player);
 
         if !ask_user_for_new_game() {
-            break
+            break;
         }
     }
 }

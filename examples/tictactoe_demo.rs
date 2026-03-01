@@ -1,4 +1,5 @@
-
+#![feature(explicit_tail_calls)]
+#![expect(incomplete_features)]
 
 extern crate neat_experiments;
 use itertools::Itertools;
