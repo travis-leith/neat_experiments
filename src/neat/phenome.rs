@@ -5,11 +5,11 @@ use std::ops::IndexMut;
 use indexmap::IndexMap;
 use itertools::Itertools;
 
-use super::genome::Genome;
-use super::genome::NodeId;
+use super::genome_old::Genome;
+use super::genome_old::NodeId;
 
 #[derive(PartialEq, Default, Clone, Debug)]
-pub enum NodeType{
+pub enum NodeType {
     Sensor,
     #[default] //TODO is a default really needed here?
     Hidden,
@@ -32,7 +32,7 @@ pub struct EdgeIndex(pub usize);
 pub struct Edge {
     pub source: NodeIndex,
     pub target: NodeIndex,
-    pub weight: f64
+    pub weight: f64,
 }
 
 #[derive(Clone)]
@@ -40,16 +40,16 @@ pub struct Node {
     pub value: f64,
     pub inputs: Vec<EdgeIndex>,
     pub node_type: NodeType,
-    pub id: NodeId
+    pub id: NodeId,
 }
 
 impl Node {
     pub fn create(node_type: NodeType, id: NodeId) -> Node {
-        Node{
+        Node {
             value: 0.,
             inputs: Vec::new(),
             node_type,
-            id
+            id,
         }
     }
 }
@@ -60,23 +60,22 @@ pub struct NodeMap(IndexMap<NodeId, Node, rustc_hash::FxBuildHasher>);
 impl NodeMap {
     fn get_or_create_node_index(&mut self, genome: &Genome, node_id: NodeId) -> NodeIndex {
         let make_node = || -> Node {
-            let node_type =
-                if node_id.0 < genome.n_sensor_nodes {
-                    NodeType::Sensor
-                } else if node_id.0 < genome.n_sensor_nodes + genome.n_output_nodes {
-                    NodeType::Output
-                } else {
-                    NodeType::Hidden
-                };
-            
+            let node_type = if node_id.0 < genome.n_sensor_nodes {
+                NodeType::Sensor
+            } else if node_id.0 < genome.n_sensor_nodes + genome.n_output_nodes {
+                NodeType::Output
+            } else {
+                NodeType::Hidden
+            };
+
             Node::create(node_type, node_id)
         };
-    
+
         match self.get_index_of(&node_id) {
             Some(node_index) => {
                 // println!("already seen node {}, fetching index {}", node_id.0, node_index);
                 node_index
-            },
+            }
             None => {
                 let node_index = NodeIndex(self.0.len());
                 self.0.insert(node_id, make_node());
@@ -87,7 +86,10 @@ impl NodeMap {
     }
 
     fn with_capacity(capacity: usize) -> NodeMap {
-        NodeMap(IndexMap::with_capacity_and_hasher(capacity, rustc_hash::FxBuildHasher))
+        NodeMap(IndexMap::with_capacity_and_hasher(
+            capacity,
+            rustc_hash::FxBuildHasher,
+        ))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Node> {
@@ -133,7 +135,7 @@ impl Index<EdgeIndex> for Edges {
 }
 
 #[derive(Clone)]
-pub struct Phenome{
+pub struct Phenome {
     pub nodes: NodeMap,
     pub edges: Edges,
     pub activation_order: Vec<(NodeIndex, Vec<(NodeIndex, f64)>)>,
@@ -145,7 +147,7 @@ pub struct Phenome{
 enum NodeStatus {
     Unknown,
     Yes,
-    No
+    No,
 }
 
 impl NodeStatus {
@@ -155,7 +157,7 @@ impl NodeStatus {
             (_, NodeStatus::Yes) => NodeStatus::Yes,
             (NodeStatus::Unknown, _) => NodeStatus::Unknown,
             (_, NodeStatus::Unknown) => NodeStatus::Unknown,
-            _ => NodeStatus::No
+            _ => NodeStatus::No,
         }
     }
 }
@@ -165,17 +167,28 @@ struct VisitRecord {
     status: NodeStatus,
     process_count: usize,
     yes_order: usize,
-    visited: bool
+    visited: bool,
 }
 
 impl VisitRecord {
     fn new(status: NodeStatus) -> VisitRecord {
-        VisitRecord{status, process_count: 0, yes_order: 0, visited: false}
+        VisitRecord {
+            status,
+            process_count: 0,
+            yes_order: 0,
+            visited: false,
+        }
     }
 }
 
-fn get_activation_order(nodes: &NodeMap, edges: &[Edge], outputs: &[NodeIndex]) -> Vec<(NodeIndex, Vec<(NodeIndex, f64)>)> {
-    let mut visisted: Vec<VisitRecord> = (0..nodes.len()).map(|_|VisitRecord::new(NodeStatus::Unknown)).collect_vec();
+fn get_activation_order(
+    nodes: &NodeMap,
+    edges: &[Edge],
+    outputs: &[NodeIndex],
+) -> Vec<(NodeIndex, Vec<(NodeIndex, f64)>)> {
+    let mut visisted: Vec<VisitRecord> = (0..nodes.len())
+        .map(|_| VisitRecord::new(NodeStatus::Unknown))
+        .collect_vec();
     let mut to_check: VecDeque<NodeIndex> = VecDeque::with_capacity(nodes.len());
     for node_index in outputs.iter() {
         to_check.push_back(*node_index);
@@ -197,17 +210,20 @@ fn get_activation_order(nodes: &NodeMap, edges: &[Edge], outputs: &[NodeIndex]) 
             // println!("{}:{} has no inputs", node_index.0, node.id.0);
             visisted[node_index.0].status = NodeStatus::No;
         } else {
-            let new_status = node.inputs.iter().fold(NodeStatus::Unknown, |acc_status, edge_index| {
-                let edge = &edges[edge_index.0];
-                if !visisted[edge.source.0].visited {
-                    // println!("{}:{} has not yet been visited", edge.source.0, phenome[edge.source].id.0);
-                    to_check.push_back(edge.source);
-                    visisted[edge.source.0].visited = true;
-                }
+            let new_status =
+                node.inputs
+                    .iter()
+                    .fold(NodeStatus::Unknown, |acc_status, edge_index| {
+                        let edge = &edges[edge_index.0];
+                        if !visisted[edge.source.0].visited {
+                            // println!("{}:{} has not yet been visited", edge.source.0, phenome[edge.source].id.0);
+                            to_check.push_back(edge.source);
+                            visisted[edge.source.0].visited = true;
+                        }
 
-                // println!("{}:{} can come from {}:{} with status {:?}", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0, visisted[edge.source.0]);
-                acc_status.plus(&visisted[edge.source.0].status)
-            });
+                        // println!("{}:{} can come from {}:{} with status {:?}", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0, visisted[edge.source.0]);
+                        acc_status.plus(&visisted[edge.source.0].status)
+                    });
 
             if visisted[node_index.0].status != new_status {
                 visisted[node_index.0].status = new_status;
@@ -228,7 +244,6 @@ fn get_activation_order(nodes: &NodeMap, edges: &[Edge], outputs: &[NodeIndex]) 
             } else {
                 // println!("{}:{} status is still {:?} which is very unexpected", node_index.0, node.id.0, visisted[node_index.0].status);
             }
-            
         }
 
         loop_count += 1;
@@ -237,30 +252,33 @@ fn get_activation_order(nodes: &NodeMap, edges: &[Edge], outputs: &[NodeIndex]) 
         }
     }
 
-    (0 .. visisted.len()).filter_map(|i| {
-        let node = &nodes[NodeIndex(i)];
-        if visisted[i].status == NodeStatus::Yes && node.node_type != NodeType::Sensor {
+    (0..visisted.len())
+        .filter_map(|i| {
             let node = &nodes[NodeIndex(i)];
-            let inputs = node.inputs.iter().filter_map(|edge_index| {
-                let edge = &edges[edge_index.0];
-                if visisted[edge.source.0].status == NodeStatus::Yes {
-                    Some((edge.source, edge.weight))
-                } else {
-                    None
-                }
-            }).collect_vec();
-            Some((visisted[i].yes_order, (NodeIndex(i), inputs)))
-        } else {
-            None
-        }
-    })
-    .sorted_by_key(|x|x.0)
-    .map(|x|x.1)
-    .collect_vec()
-}    
+            if visisted[i].status == NodeStatus::Yes && node.node_type != NodeType::Sensor {
+                let node = &nodes[NodeIndex(i)];
+                let inputs = node
+                    .inputs
+                    .iter()
+                    .filter_map(|edge_index| {
+                        let edge = &edges[edge_index.0];
+                        if visisted[edge.source.0].status == NodeStatus::Yes {
+                            Some((edge.source, edge.weight))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect_vec();
+                Some((visisted[i].yes_order, (NodeIndex(i), inputs)))
+            } else {
+                None
+            }
+        })
+        .sorted_by_key(|x| x.0)
+        .map(|x| x.1)
+        .collect_vec()
+}
 impl Phenome {
-    
-
     pub fn create_from_genome(genome: &Genome) -> Phenome {
         let mut nodes = NodeMap::with_capacity(0); //TODO: capacity?
         let mut edges = Vec::with_capacity(genome.len());
@@ -274,7 +292,11 @@ impl Phenome {
                 let in_node_index = nodes.get_or_create_node_index(genome, in_node_id);
                 let out_node_index = nodes.get_or_create_node_index(genome, out_node_id);
 
-                edges.push(Edge{source: in_node_index, target: out_node_index, weight});
+                edges.push(Edge {
+                    source: in_node_index,
+                    target: out_node_index,
+                    weight,
+                });
             }
         }
 
@@ -286,17 +308,26 @@ impl Phenome {
         for i in 0..genome.n_sensor_nodes + genome.n_output_nodes {
             nodes.get_or_create_node_index(genome, NodeId(i));
         }
-        
-        let inputs = (0..genome.n_sensor_nodes).map(|i| nodes.get_index_of(&NodeId(i)).unwrap()).collect_vec();
-        let outputs = (genome.n_sensor_nodes..genome.n_sensor_nodes + genome.n_output_nodes).map(|i| nodes.get_index_of(&NodeId(i)).unwrap()).collect_vec();
+
+        let inputs = (0..genome.n_sensor_nodes)
+            .map(|i| nodes.get_index_of(&NodeId(i)).unwrap())
+            .collect_vec();
+        let outputs = (genome.n_sensor_nodes..genome.n_sensor_nodes + genome.n_output_nodes)
+            .map(|i| nodes.get_index_of(&NodeId(i)).unwrap())
+            .collect_vec();
 
         let activation_order = get_activation_order(&nodes, &edges, &outputs);
         let edges = Edges(edges);
 
-        
-        Phenome{nodes, edges, activation_order, inputs, outputs}
+        Phenome {
+            nodes,
+            edges,
+            activation_order,
+            inputs,
+            outputs,
+        }
     }
-    
+
     pub fn activate(&mut self, sensor_values: &[f64]) {
         fn relu(x: f64) -> f64 {
             if x > 0.0 {
@@ -344,14 +375,17 @@ impl Phenome {
         }
 
         //print the rest
-        for node_index in self.activation_order.iter().map(|x|x.0) {
+        for node_index in self.activation_order.iter().map(|x| x.0) {
             let node = &self.nodes[node_index];
             let node_type = match node.node_type {
                 NodeType::Sensor => "S",
                 NodeType::Hidden => "H",
                 NodeType::Output => "O",
             };
-            println!("{}[{}:{}/{}]", node_index.0, node_index.0, node.id.0, node_type);
+            println!(
+                "{}[{}:{}/{}]",
+                node_index.0, node_index.0, node.id.0, node_type
+            );
         }
 
         for &(node_index, ref inputs) in &self.activation_order {
@@ -402,9 +436,12 @@ impl IndexMut<NodeIndex> for Phenome {
 mod tests {
     #[test]
     fn test_dead_ends() {
-        use crate::neat::{genome::{Gene, GeneExt, Genome}, phenome::Phenome};
-        let genome = 
-            Genome::create(vec![
+        use crate::neat::{
+            genome_old::{Gene, GeneExt, Genome},
+            phenome::Phenome,
+        };
+        let genome = Genome::create(
+            vec![
                 Gene::create(0, 4, 0.0, true),
                 Gene::create(4, 2, 0.0, true),
                 Gene::create(7, 6, 0.0, true),
@@ -415,13 +452,14 @@ mod tests {
                 Gene::create(1, 5, 0.0, true),
                 Gene::create(5, 3, 0.0, true),
                 Gene::create(9, 7, 0.0, true),
-                
-            ], 2, 2);
+            ],
+            2,
+            2,
+        );
 
-        let phenome =  Phenome::create_from_genome(&genome);
+        let phenome = Phenome::create_from_genome(&genome);
         phenome.print_full_mermaid_graph();
 
-        
         println!("activation order");
         for (k, v) in phenome.activation_order {
             print!("{} <- ", k.0);
@@ -432,5 +470,4 @@ mod tests {
         }
     }
     //TODO demonstrate that adding nodes does not change the activation value
-    
 }

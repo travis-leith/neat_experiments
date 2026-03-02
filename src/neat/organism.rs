@@ -1,30 +1,28 @@
-use std::ops::{Index, IndexMut};
+use super::{genome_old::GeneKey, phenome::Phenome};
+use crate::neat::genome_old::Genome;
 use itertools::Itertools;
 use rand::{seq::SliceRandom, RngCore};
 use rustc_hash::FxHashSet;
-use crate::neat::genome::Genome;
-use super::{genome::GeneKey, phenome::Phenome};
+use std::ops::{Index, IndexMut};
 
 #[derive(Clone, Copy)]
 pub struct OrganismIndex(pub usize);
-
 
 #[derive(Clone)]
 pub struct Organism {
     pub phenome: Phenome,
     pub genome: Genome,
-    pub fitness: usize
+    pub fitness: usize,
 }
 
 impl Organism {
-    
     pub fn create_from_genome(genome: Genome) -> Organism {
         let phenome = Phenome::create_from_genome(&genome);
 
         Organism {
             phenome,
             genome,
-            fitness: 0
+            fitness: 0,
         }
     }
 
@@ -35,7 +33,11 @@ impl Organism {
     pub fn activate(&mut self, sensor_values: &[f64]) -> Vec<f64> {
         debug_assert!(sensor_values.len() == self.genome.n_sensor_nodes);
         self.phenome.activate(sensor_values);
-        self.phenome.outputs.iter().map(|node_index| self.phenome.nodes[*node_index].value).collect()
+        self.phenome
+            .outputs
+            .iter()
+            .map(|node_index| self.phenome.nodes[*node_index].value)
+            .collect()
     }
 
     pub fn clear_values(&mut self) {
@@ -43,18 +45,29 @@ impl Organism {
     }
 
     pub fn trim_genome(&mut self) {
-        let distinct_gene_keys : FxHashSet<GeneKey> = 
-            self.phenome.activation_order.iter().flat_map(|(out_node_index, inputs)| {
+        let distinct_gene_keys: FxHashSet<GeneKey> = self
+            .phenome
+            .activation_order
+            .iter()
+            .flat_map(|(out_node_index, inputs)| {
                 let out_node_id = self.phenome.nodes[*out_node_index].id;
-            inputs.iter().map(|(in_node_index, _)| {
-                let in_node_id = self.phenome.nodes[*in_node_index].id;
-                GeneKey{in_node_id, out_node_id}
-            }).collect_vec()
-        }).collect();
+                inputs
+                    .iter()
+                    .map(|(in_node_index, _)| {
+                        let in_node_id = self.phenome.nodes[*in_node_index].id;
+                        GeneKey {
+                            in_node_id,
+                            out_node_id,
+                        }
+                    })
+                    .collect_vec()
+            })
+            .collect();
 
-        self.genome.data.retain(|gene_key, _| distinct_gene_keys.contains(&gene_key));
+        self.genome
+            .data
+            .retain(|gene_key, _| distinct_gene_keys.contains(&gene_key));
         self.phenome = Phenome::create_from_genome(&self.genome);
-
     }
 }
 
@@ -119,42 +132,71 @@ impl<'a> IntoParallelRefMutIterator<'a> for Organisms {
 
 #[cfg(test)]
 mod tests {
-    use crate::neat::{genome::{Gene, GeneExt, Genome, NodeId}, organism::Organism};
+    use crate::neat::{
+        genome_old::{Gene, GeneExt, Genome, NodeId},
+        organism::Organism,
+    };
     use assert_approx_eq::assert_approx_eq;
 
-    fn genome_sample_feed_forward_1() -> Genome{
-        Genome::create(vec![
-            Gene::create(0, 4, -0.1, true),
-            Gene::create(4, 3, 0.6, true),
-            Gene::create(1, 5, -0.8, true),
-            Gene::create(5, 3, -0.9, true),
-            Gene::create(0, 5, 0.6, true),
-            Gene::create(5, 2, 0.4, true),
-        ], 2, 2)
+    fn genome_sample_feed_forward_1() -> Genome {
+        Genome::create(
+            vec![
+                Gene::create(0, 4, -0.1, true),
+                Gene::create(4, 3, 0.6, true),
+                Gene::create(1, 5, -0.8, true),
+                Gene::create(5, 3, -0.9, true),
+                Gene::create(0, 5, 0.6, true),
+                Gene::create(5, 2, 0.4, true),
+            ],
+            2,
+            2,
+        )
     }
 
-    fn genome_sample_recurrent_1() -> Genome{
-        Genome::create(vec![
-            Gene::create(3, 2, 0.9, true),
-            Gene::create(1, 4, -0.8, true),
-            Gene::create(4, 3, 0.1, true),
-            Gene::create(5, 2, -0.4, true),
-            Gene::create(0, 4, -0.8, true),
-            Gene::create(3, 5, 0.5, true),
-            Gene::create(5, 4, -0.1, true),
-        ], 2, 1)
+    fn genome_sample_recurrent_1() -> Genome {
+        Genome::create(
+            vec![
+                Gene::create(3, 2, 0.9, true),
+                Gene::create(1, 4, -0.8, true),
+                Gene::create(4, 3, 0.1, true),
+                Gene::create(5, 2, -0.4, true),
+                Gene::create(0, 4, -0.8, true),
+                Gene::create(3, 5, 0.5, true),
+                Gene::create(5, 4, -0.1, true),
+            ],
+            2,
+            1,
+        )
     }
 
     #[test]
     fn organism_creation() {
-        let organism =  Organism::create_from_genome(genome_sample_feed_forward_1());
-        assert_eq!(organism.phenome.try_node_id(NodeId(2)).map(|n|n.inputs.len()), Some(1));
-        assert_eq!(organism.phenome.try_node_id(NodeId(3)).map(|n|n.inputs.len()), Some(2));
-        assert_eq!(organism.phenome.try_node_id(NodeId(4)).map(|n|n.inputs.len()), Some(1));
+        let organism = Organism::create_from_genome(genome_sample_feed_forward_1());
+        assert_eq!(
+            organism
+                .phenome
+                .try_node_id(NodeId(2))
+                .map(|n| n.inputs.len()),
+            Some(1)
+        );
+        assert_eq!(
+            organism
+                .phenome
+                .try_node_id(NodeId(3))
+                .map(|n| n.inputs.len()),
+            Some(2)
+        );
+        assert_eq!(
+            organism
+                .phenome
+                .try_node_id(NodeId(4))
+                .map(|n| n.inputs.len()),
+            Some(1)
+        );
     }
 
     #[test]
-    fn organsim_init(){
+    fn organsim_init() {
         let mut rng = rand::thread_rng();
         let n_sensor_nodes = 9;
         let n_output_nodes = 10;
@@ -166,7 +208,10 @@ mod tests {
         assert_eq!(organism.genome.n_sensor_nodes, n_sensor_nodes);
 
         for node_index in organism.genome.n_sensor_nodes..organism.phenome.nodes.len() {
-            let input_length = organism.phenome.try_node_id(NodeId(node_index)).map(|n|n.inputs.len());
+            let input_length = organism
+                .phenome
+                .try_node_id(NodeId(node_index))
+                .map(|n| n.inputs.len());
             assert_eq!(input_length, Some(n_sensor_nodes))
         }
     }
@@ -174,7 +219,7 @@ mod tests {
     #[test]
     fn feed_forward() {
         let genome = genome_sample_feed_forward_1();
-        let mut organism =  Organism::create_from_genome(genome);
+        let mut organism = Organism::create_from_genome(genome);
 
         organism.phenome.print_mermaid_graph();
         let output = organism.activate(&vec![0.5, -0.2]);
@@ -186,13 +231,12 @@ mod tests {
     #[test]
     fn recurrent() {
         let genome = genome_sample_recurrent_1();
-        let mut organism =  Organism::create_from_genome(genome);
+        let mut organism = Organism::create_from_genome(genome);
         organism.phenome.print_mermaid_graph();
 
         let inputs = vec![-0.9, 0.6];
 
         let outputs = organism.activate(&inputs);
         assert_approx_eq!(outputs[0], 0.0168);
-        
     }
 }
