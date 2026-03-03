@@ -6,3 +6,5 @@ mod tictactoe;
 fn main() {
     tictactoe::cli::game_loop();
 }
+
+// run with `cargo +nightly run --example play_tictactoe`
