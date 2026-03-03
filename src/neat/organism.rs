@@ -1,4 +1,4 @@
-use super::{genome_old::GeneKey, phenome::Phenome};
+use super::{genome_old::GeneKey, phenome_old::Phenome};
 use crate::neat::genome_old::Genome;
 use itertools::Itertools;
 use rand::{seq::SliceRandom, RngCore};

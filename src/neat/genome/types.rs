@@ -29,13 +29,13 @@ pub struct ConnectionGene {
 
 #[derive(Debug, Clone)]
 pub struct Genome {
-    pub(super) n_inputs: usize,
-    pub(super) n_outputs: usize,
-    pub(super) nodes: BTreeMap<NodeId, NodeKind>,
+    pub n_inputs: usize,
+    pub n_outputs: usize,
+    pub nodes: BTreeMap<NodeId, NodeKind>,
     // Sorted by innovation for O(n) alignment.
-    pub(super) connections_by_innovation: BTreeMap<Innovation, ConnectionGene>,
+    pub connections_by_innovation: BTreeMap<Innovation, ConnectionGene>,
     // Fast duplicate checking by structural key.
-    pub(super) connection_to_innovation: HashMap<ConnectionKey, Innovation>,
+    pub connection_to_innovation: HashMap<ConnectionKey, Innovation>,
 }
 
 impl Genome {

@@ -1,473 +1,485 @@
-use std::collections::VecDeque;
-use std::ops::Index;
-use std::ops::IndexMut;
+use super::genome::types::{Genome, GenomeError, NodeId, NodeKind};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 
-use indexmap::IndexMap;
-use itertools::Itertools;
-
-use super::genome_old::Genome;
-use super::genome_old::NodeId;
-
-#[derive(PartialEq, Default, Clone, Debug)]
-pub enum NodeType {
-    Sensor,
-    #[default] //TODO is a default really needed here?
-    Hidden,
-    Output,
-}
-
-#[derive(PartialEq, PartialOrd, Clone, Copy, Hash, Eq, Debug)]
-pub struct NodeIndex(pub usize);
-
-impl NodeIndex {
-    pub fn inc(self) -> NodeIndex {
-        NodeIndex(self.0 + 1)
+fn relu(x: f64) -> f64 {
+    if x > 0.0 {
+        x
+    } else {
+        0.0
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct EdgeIndex(pub usize);
-
-#[derive(Clone)]
-pub struct Edge {
-    pub source: NodeIndex,
-    pub target: NodeIndex,
-    pub weight: f64,
+#[derive(Debug, Copy, Clone)]
+struct Edge {
+    src: usize,
+    dst: usize,
+    weight: f64,
 }
 
-#[derive(Clone)]
-pub struct Node {
-    pub value: f64,
-    pub inputs: Vec<EdgeIndex>,
-    pub node_type: NodeType,
-    pub id: NodeId,
+#[derive(Debug, Clone)]
+struct PlannedComponent {
+    nodes: Vec<usize>,
+    external_edges: Vec<Edge>,
+    internal_edges: Vec<Edge>,
+    recurrent: bool,
 }
 
-impl Node {
-    pub fn create(node_type: NodeType, id: NodeId) -> Node {
-        Node {
-            value: 0.,
-            inputs: Vec::new(),
-            node_type,
-            id,
+#[derive(Debug, Copy, Clone)]
+pub struct ActivationConfig {
+    pub recurrent_iterations: usize,
+    pub recurrent_epsilon: f64,
+}
+
+impl Default for ActivationConfig {
+    fn default() -> Self {
+        Self {
+            recurrent_iterations: 12,
+            recurrent_epsilon: 1e-9,
         }
     }
 }
 
-#[derive(Clone)]
-pub struct NodeMap(IndexMap<NodeId, Node, rustc_hash::FxBuildHasher>);
-
-impl NodeMap {
-    fn get_or_create_node_index(&mut self, genome: &Genome, node_id: NodeId) -> NodeIndex {
-        let make_node = || -> Node {
-            let node_type = if node_id.0 < genome.n_sensor_nodes {
-                NodeType::Sensor
-            } else if node_id.0 < genome.n_sensor_nodes + genome.n_output_nodes {
-                NodeType::Output
-            } else {
-                NodeType::Hidden
-            };
-
-            Node::create(node_type, node_id)
-        };
-
-        match self.get_index_of(&node_id) {
-            Some(node_index) => {
-                // println!("already seen node {}, fetching index {}", node_id.0, node_index);
-                node_index
-            }
-            None => {
-                let node_index = NodeIndex(self.0.len());
-                self.0.insert(node_id, make_node());
-                // println!("new node {}, inserting index {}", node_id.0, node_index.0);
-                node_index
-            }
-        }
-    }
-
-    fn with_capacity(capacity: usize) -> NodeMap {
-        NodeMap(IndexMap::with_capacity_and_hasher(
-            capacity,
-            rustc_hash::FxBuildHasher,
-        ))
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &Node> {
-        self.0.values()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn get_index_of(&self, node_id: &NodeId) -> Option<NodeIndex> {
-        self.0.get_index_of(node_id).map(NodeIndex)
-    }
+#[derive(Debug, Clone)]
+pub enum PhenomeError {
+    InputArityMismatch { expected: usize, actual: usize },
+    InvalidGenome(GenomeError),
 }
 
-impl Index<NodeIndex> for NodeMap {
-    type Output = Node;
-    fn index(&self, index: NodeIndex) -> &Self::Output {
-        &self.0[index.0]
-    }
+fn build_node_index(genome: &Genome) -> (Vec<NodeId>, Vec<NodeKind>, HashMap<NodeId, usize>) {
+    let node_ids = genome.nodes.keys().copied().collect::<Vec<_>>();
+    let node_kinds = node_ids
+        .iter()
+        .map(|id| *genome.nodes.get(id).expect("node id must exist"))
+        .collect::<Vec<_>>();
+    let node_index = node_ids
+        .iter()
+        .enumerate()
+        .map(|(idx, id)| (*id, idx))
+        .collect::<HashMap<_, _>>();
+    (node_ids, node_kinds, node_index)
 }
 
-impl IndexMut<NodeIndex> for NodeMap {
-    fn index_mut(&mut self, index: NodeIndex) -> &mut Self::Output {
-        &mut self.0[index.0]
-    }
-}
-
-#[derive(Clone)]
-pub struct Edges(Vec<Edge>);
-
-impl Edges {
-    pub fn iter(&self) -> impl Iterator<Item = &Edge> {
-        self.0.iter()
-    }
-}
-
-impl Index<EdgeIndex> for Edges {
-    type Output = Edge;
-    fn index(&self, index: EdgeIndex) -> &Self::Output {
-        &self.0[index.0]
-    }
-}
-
-#[derive(Clone)]
-pub struct Phenome {
-    pub nodes: NodeMap,
-    pub edges: Edges,
-    pub activation_order: Vec<(NodeIndex, Vec<(NodeIndex, f64)>)>,
-    pub inputs: Vec<NodeIndex>,
-    pub outputs: Vec<NodeIndex>,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-enum NodeStatus {
-    Unknown,
-    Yes,
-    No,
-}
-
-impl NodeStatus {
-    fn plus(&self, other: &NodeStatus) -> NodeStatus {
-        match (self, other) {
-            (NodeStatus::Yes, _) => NodeStatus::Yes,
-            (_, NodeStatus::Yes) => NodeStatus::Yes,
-            (NodeStatus::Unknown, _) => NodeStatus::Unknown,
-            (_, NodeStatus::Unknown) => NodeStatus::Unknown,
-            _ => NodeStatus::No,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct VisitRecord {
-    status: NodeStatus,
-    process_count: usize,
-    yes_order: usize,
-    visited: bool,
-}
-
-impl VisitRecord {
-    fn new(status: NodeStatus) -> VisitRecord {
-        VisitRecord {
-            status,
-            process_count: 0,
-            yes_order: 0,
-            visited: false,
-        }
-    }
-}
-
-fn get_activation_order(
-    nodes: &NodeMap,
-    edges: &[Edge],
-    outputs: &[NodeIndex],
-) -> Vec<(NodeIndex, Vec<(NodeIndex, f64)>)> {
-    let mut visisted: Vec<VisitRecord> = (0..nodes.len())
-        .map(|_| VisitRecord::new(NodeStatus::Unknown))
-        .collect_vec();
-    let mut to_check: VecDeque<NodeIndex> = VecDeque::with_capacity(nodes.len());
-    for node_index in outputs.iter() {
-        to_check.push_back(*node_index);
-        visisted[node_index.0].visited = true;
-    }
-
-    let mut loop_count = 0;
-    let mut yes_count = 0;
-    while let Some(node_index) = to_check.pop_front() {
-        // println!("processing node {}:{} with status {:?}", node_index.0, phenome[node_index].id.0, visisted[node_index.0]);
-        let node = &nodes[node_index];
-
-        if node.node_type == NodeType::Sensor {
-            // println!("{}:{} is a sensor", node_index.0, node.id.0);
-            yes_count += 1;
-            visisted[node_index.0].status = NodeStatus::Yes;
-            visisted[node_index.0].yes_order = yes_count;
-        } else if node.inputs.is_empty() {
-            // println!("{}:{} has no inputs", node_index.0, node.id.0);
-            visisted[node_index.0].status = NodeStatus::No;
-        } else {
-            let new_status =
-                node.inputs
-                    .iter()
-                    .fold(NodeStatus::Unknown, |acc_status, edge_index| {
-                        let edge = &edges[edge_index.0];
-                        if !visisted[edge.source.0].visited {
-                            // println!("{}:{} has not yet been visited", edge.source.0, phenome[edge.source].id.0);
-                            to_check.push_back(edge.source);
-                            visisted[edge.source.0].visited = true;
-                        }
-
-                        // println!("{}:{} can come from {}:{} with status {:?}", node_index.0, node.id.0, edge.source.0, phenome[edge.source].id.0, visisted[edge.source.0]);
-                        acc_status.plus(&visisted[edge.source.0].status)
-                    });
-
-            if visisted[node_index.0].status != new_status {
-                visisted[node_index.0].status = new_status;
-                // println!("{}:{} status changed from {:?} to {:?}", node_index.0, node.id.0, visisted[node_index.0].status, new_status);
-                if new_status == NodeStatus::Yes {
-                    yes_count += 1;
-                    visisted[node_index.0].yes_order = yes_count;
-                }
-            } else if visisted[node_index.0].status == NodeStatus::Unknown {
-                if visisted[node_index.0].process_count > 2 {
-                    visisted[node_index.0].status = NodeStatus::No;
-                    // println!("{}:{} status changed from {:?} to No", node_index.0, node.id.0, visisted[node_index.0].status);
-                } else {
-                    visisted[node_index.0].process_count += 1;
-                    to_check.push_back(node_index);
-                    // println!("{}:{} status is still unknown", node_index.0, node.id.0);
-                }
-            } else {
-                // println!("{}:{} status is still {:?} which is very unexpected", node_index.0, node.id.0, visisted[node_index.0].status);
-            }
-        }
-
-        loop_count += 1;
-        if loop_count >= 16383 {
-            break;
-        }
-    }
-
-    (0..visisted.len())
-        .filter_map(|i| {
-            let node = &nodes[NodeIndex(i)];
-            if visisted[i].status == NodeStatus::Yes && node.node_type != NodeType::Sensor {
-                let node = &nodes[NodeIndex(i)];
-                let inputs = node
-                    .inputs
-                    .iter()
-                    .filter_map(|edge_index| {
-                        let edge = &edges[edge_index.0];
-                        if visisted[edge.source.0].status == NodeStatus::Yes {
-                            Some((edge.source, edge.weight))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect_vec();
-                Some((visisted[i].yes_order, (NodeIndex(i), inputs)))
-            } else {
-                None
-            }
+fn build_enabled_edges(genome: &Genome, node_index: &HashMap<NodeId, usize>) -> Vec<Edge> {
+    genome
+        .connections_by_innovation
+        .values()
+        .filter(|g| g.enabled)
+        .map(|g| Edge {
+            src: *node_index
+                .get(&g.key.in_node)
+                .expect("source node must exist"),
+            dst: *node_index
+                .get(&g.key.out_node)
+                .expect("destination node must exist"),
+            weight: g.weight,
         })
-        .sorted_by_key(|x| x.0)
-        .map(|x| x.1)
-        .collect_vec()
+        .collect::<Vec<_>>()
 }
-impl Phenome {
-    pub fn create_from_genome(genome: &Genome) -> Phenome {
-        let mut nodes = NodeMap::with_capacity(0); //TODO: capacity?
-        let mut edges = Vec::with_capacity(genome.len());
 
-        for (gene_key, gene_val) in genome.iter() {
-            if gene_val.enabled {
-                let in_node_id = gene_key.in_node_id;
-                let out_node_id = gene_key.out_node_id;
-                let weight = gene_val.weight;
+fn tarjan_scc(node_count: usize, edges: &[Edge]) -> Vec<Vec<usize>> {
+    fn strong_connect(
+        v: usize,
+        graph: &[Vec<usize>],
+        index: &mut usize,
+        indices: &mut [Option<usize>],
+        lowlink: &mut [usize],
+        on_stack: &mut [bool],
+        stack: &mut Vec<usize>,
+        sccs: &mut Vec<Vec<usize>>,
+    ) {
+        indices[v] = Some(*index);
+        lowlink[v] = *index;
+        *index += 1;
+        stack.push(v);
+        on_stack[v] = true;
 
-                let in_node_index = nodes.get_or_create_node_index(genome, in_node_id);
-                let out_node_index = nodes.get_or_create_node_index(genome, out_node_id);
-
-                edges.push(Edge {
-                    source: in_node_index,
-                    target: out_node_index,
-                    weight,
-                });
+        for &w in &graph[v] {
+            if indices[w].is_none() {
+                strong_connect(w, graph, index, indices, lowlink, on_stack, stack, sccs);
+                lowlink[v] = lowlink[v].min(lowlink[w]);
+            } else if on_stack[w] {
+                lowlink[v] = lowlink[v].min(indices[w].expect("must exist"));
             }
         }
 
-        for (i, edge) in edges.iter().enumerate() {
-            nodes[edge.target].inputs.push(EdgeIndex(i));
-        }
-
-        //make sure sensor and output nodes are represented in the nodes map
-        for i in 0..genome.n_sensor_nodes + genome.n_output_nodes {
-            nodes.get_or_create_node_index(genome, NodeId(i));
-        }
-
-        let inputs = (0..genome.n_sensor_nodes)
-            .map(|i| nodes.get_index_of(&NodeId(i)).unwrap())
-            .collect_vec();
-        let outputs = (genome.n_sensor_nodes..genome.n_sensor_nodes + genome.n_output_nodes)
-            .map(|i| nodes.get_index_of(&NodeId(i)).unwrap())
-            .collect_vec();
-
-        let activation_order = get_activation_order(&nodes, &edges, &outputs);
-        let edges = Edges(edges);
-
-        Phenome {
-            nodes,
-            edges,
-            activation_order,
-            inputs,
-            outputs,
-        }
-    }
-
-    pub fn activate(&mut self, sensor_values: &[f64]) {
-        fn relu(x: f64) -> f64 {
-            if x > 0.0 {
-                x
-            } else {
-                0.0
+        if lowlink[v] == indices[v].expect("must exist") {
+            let mut component = Vec::new();
+            loop {
+                let w = stack.pop().expect("stack underflow");
+                on_stack[w] = false;
+                component.push(w);
+                if w == v {
+                    break;
+                }
             }
-        }
-
-        // fn sigmoid(x: f64) -> f64 {
-        //     1.0 / (1.0 + (-4.9 * x).exp())
-        // }
-
-        for (i, &input) in sensor_values.iter().enumerate() {
-            let node_index = self.inputs[i];
-            self[node_index].value = input;
-        }
-
-        for &(node_index, ref inputs) in &self.activation_order {
-            let node = &self[node_index];
-            debug_assert!(node.node_type != NodeType::Sensor);
-            let active_sum = inputs.iter().fold(0., |acc, &(input_index, w)| {
-                acc + w * self[input_index].value
-            });
-            self.nodes[node_index].value = relu(active_sum);
+            component.sort_unstable();
+            sccs.push(component);
         }
     }
 
-    pub fn clear_values(&mut self) {
-        for node in self.nodes.0.values_mut() {
-            node.value = 0.;
-        }
+    let mut graph = vec![Vec::<usize>::new(); node_count];
+    for e in edges {
+        graph[e.src].push(e.dst);
     }
 
-    pub fn try_node_id(&self, node_id: NodeId) -> Option<&Node> {
-        self.nodes.0.get(&node_id)
-    }
+    let mut index = 0usize;
+    let mut indices = vec![None; node_count];
+    let mut lowlink = vec![0usize; node_count];
+    let mut on_stack = vec![false; node_count];
+    let mut stack = Vec::<usize>::new();
+    let mut sccs = Vec::<Vec<usize>>::new();
 
-    pub fn print_mermaid_graph(&self) {
-        println!("graph TD");
-        //print the sensor nodes
-        for node_index in self.inputs.iter() {
-            let node = &self.nodes[*node_index];
-            println!("{}[{}:{}/S]", node_index.0, node_index.0, node.id.0);
-        }
-
-        //print the rest
-        for node_index in self.activation_order.iter().map(|x| x.0) {
-            let node = &self.nodes[node_index];
-            let node_type = match node.node_type {
-                NodeType::Sensor => "S",
-                NodeType::Hidden => "H",
-                NodeType::Output => "O",
-            };
-            println!(
-                "{}[{}:{}/{}]",
-                node_index.0, node_index.0, node.id.0, node_type
+    for v in 0..node_count {
+        if indices[v].is_none() {
+            strong_connect(
+                v,
+                &graph,
+                &mut index,
+                &mut indices,
+                &mut lowlink,
+                &mut on_stack,
+                &mut stack,
+                &mut sccs,
             );
         }
+    }
 
-        for &(node_index, ref inputs) in &self.activation_order {
-            for (input_index, weight) in inputs {
-                println!("{} -->|{:.4}|{}", input_index.0, weight, node_index.0);
+    sccs
+}
+
+fn build_component_index(sccs: &[Vec<usize>], node_count: usize) -> Vec<usize> {
+    let mut component_of_node = vec![0usize; node_count];
+    for (cid, comp) in sccs.iter().enumerate() {
+        for &n in comp {
+            component_of_node[n] = cid;
+        }
+    }
+    component_of_node
+}
+
+fn build_condensation_topo(
+    sccs: &[Vec<usize>],
+    component_of_node: &[usize],
+    edges: &[Edge],
+) -> Vec<usize> {
+    let c_count = sccs.len();
+    let mut dag_out = vec![BTreeSet::<usize>::new(); c_count];
+    let mut indegree = vec![0usize; c_count];
+
+    for e in edges {
+        let c_src = component_of_node[e.src];
+        let c_dst = component_of_node[e.dst];
+        if c_src != c_dst && dag_out[c_src].insert(c_dst) {
+            indegree[c_dst] += 1;
+        }
+    }
+
+    let mut q = VecDeque::new();
+    for (cid, d) in indegree.iter().enumerate() {
+        if *d == 0 {
+            q.push_back(cid);
+        }
+    }
+
+    let mut order = Vec::with_capacity(c_count);
+    while let Some(cid) = q.pop_front() {
+        order.push(cid);
+        for &next in &dag_out[cid] {
+            indegree[next] -= 1;
+            if indegree[next] == 0 {
+                q.push_back(next);
             }
         }
     }
 
-    pub fn print_full_mermaid_graph(&self) {
-        println!("graph TD");
-        for (i, node) in self.nodes.iter().enumerate() {
-            let node_id = node.id;
-            let node_type = match node.node_type {
-                NodeType::Sensor => "S",
-                NodeType::Hidden => "H",
-                NodeType::Output => "O",
-            };
-            println!("{}[{}:{}/{}]", i, i, node_id.0, node_type);
+    order
+}
+
+fn build_plan(node_count: usize, edges: &[Edge]) -> Vec<PlannedComponent> {
+    let sccs = tarjan_scc(node_count, edges);
+    let component_of_node = build_component_index(&sccs, node_count);
+    let topo = build_condensation_topo(&sccs, &component_of_node, edges);
+
+    topo.into_iter()
+        .map(|cid| {
+            let nodes = sccs[cid].clone();
+            let in_component = nodes.iter().copied().collect::<BTreeSet<_>>();
+
+            let external_edges = edges
+                .iter()
+                .copied()
+                .filter(|e| in_component.contains(&e.dst) && !in_component.contains(&e.src))
+                .collect::<Vec<_>>();
+
+            let internal_edges = edges
+                .iter()
+                .copied()
+                .filter(|e| in_component.contains(&e.src) && in_component.contains(&e.dst))
+                .collect::<Vec<_>>();
+
+            let has_self_loop = internal_edges.iter().any(|e| e.src == e.dst);
+            let recurrent = nodes.len() > 1 || has_self_loop;
+
+            PlannedComponent {
+                nodes,
+                external_edges,
+                internal_edges,
+                recurrent,
+            }
+        })
+        .collect::<Vec<_>>()
+}
+
+#[derive(Debug, Clone)]
+pub struct Phenome {
+    node_ids: Vec<NodeId>,
+    node_kinds: Vec<NodeKind>,
+    input_indices: Vec<usize>,
+    output_indices: Vec<usize>,
+    components: Vec<PlannedComponent>,
+    config: ActivationConfig,
+    state: Vec<f64>,
+    scratch: Vec<f64>,
+}
+
+impl Phenome {
+    pub fn from_genome(genome: &Genome) -> Result<Self, PhenomeError> {
+        Self::from_genome_with_config(genome, ActivationConfig::default())
+    }
+
+    pub fn from_genome_with_config(
+        genome: &Genome,
+        config: ActivationConfig,
+    ) -> Result<Self, PhenomeError> {
+        let (node_ids, node_kinds, node_index) = build_node_index(genome);
+        let edges = build_enabled_edges(genome, &node_index);
+        let components = build_plan(node_ids.len(), &edges);
+
+        let input_indices = node_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(i, _)| (node_kinds[i] == NodeKind::Sensor).then_some(i))
+            .collect::<Vec<_>>();
+
+        let output_indices = node_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(i, _)| (node_kinds[i] == NodeKind::Output).then_some(i))
+            .collect::<Vec<_>>();
+
+        Ok(Self {
+            node_ids,
+            node_kinds,
+            input_indices,
+            output_indices,
+            components,
+            config,
+            state: vec![0.0; genome.nodes.len()],
+            scratch: vec![0.0; genome.nodes.len()],
+        })
+    }
+
+    fn reset_non_sensor_state(&mut self) {
+        for (i, kind) in self.node_kinds.iter().enumerate() {
+            if *kind != NodeKind::Sensor {
+                self.state[i] = 0.0;
+            }
+        }
+    }
+
+    fn set_inputs(&mut self, inputs: &[f64]) -> Result<(), PhenomeError> {
+        if inputs.len() != self.input_indices.len() {
+            return Err(PhenomeError::InputArityMismatch {
+                expected: self.input_indices.len(),
+                actual: inputs.len(),
+            });
         }
 
-        for edge in self.edges.iter() {
-            println!("{} -->|{:.4}|{}", edge.source.0, edge.weight, edge.target.0);
+        for (x, idx) in inputs.iter().zip(self.input_indices.iter().copied()) {
+            self.state[idx] = *x;
+        }
+
+        Ok(())
+    }
+
+    fn zero_component_scratch(&mut self, comp: &PlannedComponent) {
+        for &n in &comp.nodes {
+            self.scratch[n] = 0.0;
         }
     }
-}
 
-impl Index<NodeIndex> for Phenome {
-    type Output = Node;
-    fn index(&self, index: NodeIndex) -> &Self::Output {
-        &self.nodes[index]
+    fn accumulate_external_weighted_sum(&mut self, comp: &PlannedComponent) {
+        for e in &comp.external_edges {
+            self.scratch[e.dst] += self.state[e.src] * e.weight;
+        }
+    }
+
+    fn accumulate_internal_weighted_sum(&mut self, comp: &PlannedComponent) {
+        for e in &comp.internal_edges {
+            self.scratch[e.dst] += self.state[e.src] * e.weight;
+        }
+    }
+
+    fn commit_component_values(&mut self, comp: &PlannedComponent) {
+        for &n in &comp.nodes {
+            if self.node_kinds[n] != NodeKind::Sensor {
+                self.state[n] = relu(self.scratch[n]);
+            }
+        }
+    }
+
+    fn activate_acyclic_component(&mut self, comp: &PlannedComponent) {
+        self.zero_component_scratch(comp);
+        self.accumulate_external_weighted_sum(comp);
+        self.accumulate_internal_weighted_sum(comp);
+        self.commit_component_values(comp);
+    }
+
+    fn activate_recurrent_component(&mut self, comp: &PlannedComponent) {
+        for _ in 0..self.config.recurrent_iterations {
+            self.zero_component_scratch(comp);
+            self.accumulate_external_weighted_sum(comp);
+            self.accumulate_internal_weighted_sum(comp);
+
+            let mut max_delta = 0.0f64;
+            for &n in &comp.nodes {
+                if self.node_kinds[n] == NodeKind::Sensor {
+                    continue;
+                }
+                let next = relu(self.scratch[n]);
+                let delta = (next - self.state[n]).abs();
+                if delta > max_delta {
+                    max_delta = delta;
+                }
+                self.state[n] = next;
+            }
+
+            if max_delta <= self.config.recurrent_epsilon {
+                break;
+            }
+        }
+    }
+
+    pub fn activate(&mut self, inputs: &[f64]) -> Result<Vec<f64>, PhenomeError> {
+        self.reset_non_sensor_state();
+        self.set_inputs(inputs)?;
+
+        for i in 0..self.components.len() {
+            let comp = self.components[i].clone();
+            if comp.recurrent {
+                self.activate_recurrent_component(&comp);
+            } else {
+                self.activate_acyclic_component(&comp);
+            }
+        }
+
+        Ok(self
+            .output_indices
+            .iter()
+            .map(|&idx| self.state[idx])
+            .collect::<Vec<_>>())
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.node_ids.len()
     }
 }
 
-impl Index<EdgeIndex> for Phenome {
-    type Output = Edge;
-    fn index(&self, index: EdgeIndex) -> &Self::Output {
-        &self.edges[index]
-    }
-}
-
-impl IndexMut<NodeIndex> for Phenome {
-    fn index_mut(&mut self, index: NodeIndex) -> &mut Self::Output {
-        &mut self.nodes[index]
-    }
-}
-
+#[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::neat::genome::innovation::InnovationTracker;
+    use crate::neat::genome::mutation::Mutation;
+    use crate::neat::genome::types::{Genome, Innovation, NodeId};
+
+    fn base_genome() -> (InnovationTracker, Genome) {
+        let mut t = InnovationTracker::new(NodeId(2));
+        let g = Genome::minimal_fully_connected(1, 1, &mut t, |_i, _o| 1.0);
+        (t, g)
+    }
+
     #[test]
-    fn test_dead_ends() {
-        use crate::neat::{
-            genome_old::{Gene, GeneExt, Genome},
-            phenome::Phenome,
-        };
-        let genome = Genome::create(
-            vec![
-                Gene::create(0, 4, 0.0, true),
-                Gene::create(4, 2, 0.0, true),
-                Gene::create(7, 6, 0.0, true),
-                Gene::create(4, 6, 0.0, true),
-                Gene::create(4, 8, 0.0, true),
-                Gene::create(6, 5, 0.0, true),
-                Gene::create(5, 4, 0.0, true),
-                Gene::create(1, 5, 0.0, true),
-                Gene::create(5, 3, 0.0, true),
-                Gene::create(9, 7, 0.0, true),
-            ],
-            2,
-            2,
-        );
+    fn feedforward_activation_uses_relu_per_connection() {
+        let mut t = InnovationTracker::new(NodeId(3));
+        let g = Genome::minimal_fully_connected(2, 1, &mut t, |_i, _o| 1.0);
 
-        let phenome = Phenome::create_from_genome(&genome);
-        phenome.print_full_mermaid_graph();
+        let mut p = Phenome::from_genome(&g).unwrap();
+        let out = p.activate(&[2.0, -3.0]).unwrap();
+        assert_eq!(out.len(), 1);
+        assert!((out[0] - 2.0).abs() < 1e-12); // relu(2*1) + relu(-3*1)
+    }
 
-        println!("activation order");
-        for (k, v) in phenome.activation_order {
-            print!("{} <- ", k.0);
-            for (i, w) in &v {
-                print!("{}({:.4})", i.0, w);
-            }
-            println!("");
+    #[test]
+    fn recurrent_activation_is_bounded_and_does_not_loop_forever() {
+        let (mut t, g0) = base_genome();
+        let split = g0.innovations().next().unwrap();
+
+        let g1 = g0.with_added_node(&mut t, split).unwrap();
+        let g2 = g1
+            .with_added_connection(&mut t, NodeId(1), NodeId(2), 0.5)
+            .unwrap();
+
+        let mut p = Phenome::from_genome_with_config(
+            &g2,
+            ActivationConfig {
+                recurrent_iterations: 4,
+                recurrent_epsilon: 0.0,
+            },
+        )
+        .unwrap();
+
+        let out = p.activate(&[1.0]).unwrap();
+        assert!((out[0] - 1.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn activation_respects_input_arity() {
+        let (_t, g) = base_genome();
+        let mut p = Phenome::from_genome(&g).unwrap();
+        let err = p.activate(&[1.0, 2.0]).err().unwrap();
+        match err {
+            PhenomeError::InputArityMismatch {
+                expected: 1,
+                actual: 2,
+            } => {}
+            _ => panic!("expected input arity mismatch"),
         }
     }
-    //TODO demonstrate that adding nodes does not change the activation value
+
+    #[test]
+    fn apply_mutations_then_activate() {
+        let mut t = InnovationTracker::new(NodeId(3));
+        let g0 = Genome::minimal_fully_connected(2, 1, &mut t, |_i, _o| 1.0);
+        let first = g0.innovations().next().unwrap();
+
+        let g1 = g0
+            .apply_mutations(
+                &mut t,
+                &[
+                    Mutation::PerturbWeight {
+                        innovation: first,
+                        delta: 2.0,
+                    },
+                    Mutation::AddNode {
+                        split_innovation: Innovation(1),
+                    },
+                ],
+            )
+            .unwrap();
+
+        let mut p = Phenome::from_genome(&g1).unwrap();
+        let out = p.activate(&[1.0, 3.0]).unwrap();
+        assert!((out[0] - 6.0).abs() < 1e-12); // relu(1*3) + relu(3*1)
+    }
+
+    #[test]
+    fn feedforward_activation_applies_relu_after_accumulation() {
+        let mut t = InnovationTracker::new(NodeId(3));
+        let g = Genome::minimal_fully_connected(2, 1, &mut t, |_i, _o| 1.0);
+
+        let mut p = Phenome::from_genome(&g).unwrap();
+        let out = p.activate(&[2.0, -3.0]).unwrap();
+        assert_eq!(out.len(), 1);
+        assert!((out[0] - 0.0).abs() < 1e-12); // relu((2*1) + (-3*1))
+    }
 }

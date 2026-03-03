@@ -1,7 +1,7 @@
 mod crossover;
 mod distance;
 mod init;
-mod innovation;
-mod mutation;
+pub mod innovation;
+pub mod mutation;
 mod tests;
-mod types;
+pub mod types;
