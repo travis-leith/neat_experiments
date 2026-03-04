@@ -1,18 +1,24 @@
 extern crate neat_experiments;
 
-
-use neat_experiments::neat::{common::Settings, organism::Organism, population::SinglePlayerArena};
+use neat_experiments::neat::{
+    common::Settings, organism::Organism, population_old::SinglePlayerArena,
+};
 use rand::SeedableRng;
 // use rand::seq::SliceRandom;
+use neat_experiments::neat::population_old::Population;
 use rand_xoshiro::Xoshiro256PlusPlus;
-use neat_experiments::neat::population::Population;
 
 //create xor evaluator
 struct XorEvaluator;
 
 impl SinglePlayerArena for XorEvaluator {
     fn generate_inputs(&self) -> Vec<Vec<f64>> {
-        vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 1.0], vec![1.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]]
+        vec![
+            vec![0.0, 0.0, 1.0],
+            vec![0.0, 1.0, 1.0],
+            vec![1.0, 0.0, 1.0],
+            vec![1.0, 1.0, 1.0],
+        ]
     }
 
     fn evaluate_organisms(&self, outputs: Vec<Vec<f64>>) -> usize {
@@ -27,7 +33,12 @@ impl SinglePlayerArena for XorEvaluator {
 }
 
 fn check_evaluation(organism: &mut Organism) {
-    let inputs = vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 1.0], vec![1.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]];
+    let inputs = vec![
+        vec![0.0, 0.0, 1.0],
+        vec![0.0, 1.0, 1.0],
+        vec![1.0, 0.0, 1.0],
+        vec![1.0, 1.0, 1.0],
+    ];
     for i in 0..inputs.len() {
         organism.clear_values();
         let output = organism.activate(&inputs[i]);
@@ -35,7 +46,11 @@ fn check_evaluation(organism: &mut Organism) {
     }
 }
 fn describe_population_demographics(population: &Population) {
-    println!("generation: {:?}; n_species: {:?}", population.generation, population.species.len());
+    println!(
+        "generation: {:?}; n_species: {:?}",
+        population.generation,
+        population.species.len()
+    );
     // for (i, s) in population.species.iter().enumerate() {
     //     println!("\tspecies: {:?}", i);
     //     println!("\tnumber of members: {:?}", s.members.len());
@@ -45,15 +60,27 @@ fn describe_population_demographics(population: &Population) {
 
 fn describe_population_fitness(population: &Population) {
     // println!("generation: {:?}; n_species: {:?}", population.generation, population.species.len());
-    let avg_fitness = population.species.iter().map(|s| s.avg_fitness).sum::<f64>() / population.species.len() as f64;
-    let max_fitness = population.organisms.iter().map(|o| o.fitness).fold(0, |acc, x| acc.max(x));
+    let avg_fitness = population
+        .species
+        .iter()
+        .map(|s| s.avg_fitness)
+        .sum::<f64>()
+        / population.species.len() as f64;
+    let max_fitness = population
+        .organisms
+        .iter()
+        .map(|o| o.fitness)
+        .fold(0, |acc, x| acc.max(x));
     // for (i, s) in population.species.iter().enumerate() {
     //     println!("\tspecies: {:?}", i);
     //     println!("\tchampion fitness: {:?}", population.organisms[s.champion].fitness);
     //     println!("\taverage fitness: {:?}", s.avg_fitness);
     //     println!("");
     // }
-    println!("avg fitness: {:?}; max fitness: {:?}", avg_fitness, max_fitness);
+    println!(
+        "avg fitness: {:?}; max fitness: {:?}",
+        avg_fitness, max_fitness
+    );
 }
 
 fn get_solution_organism(population: &Population) -> Option<&Organism> {
@@ -76,7 +103,7 @@ fn main() {
     let mut evaluator = XorEvaluator;
 
     describe_population_demographics(&population);
-    population.evaluate(&mut evaluator, true);        
+    population.evaluate(&mut evaluator, true);
     describe_population_fitness(&population);
 
     for _ in 0..5000 {
@@ -92,7 +119,6 @@ fn main() {
             let mut cloned_org = Organism::create_from_genome(solution_org.genome.clone());
             check_evaluation(&mut cloned_org);
 
-            
             break;
         }
     }

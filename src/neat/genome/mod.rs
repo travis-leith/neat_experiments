@@ -1,5 +1,5 @@
-mod crossover;
-mod distance;
+pub mod crossover;
+pub mod distance;
 mod init;
 pub mod innovation;
 pub mod mutation;

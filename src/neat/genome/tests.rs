@@ -14,6 +14,47 @@ mod tests {
         Genome::minimal_fully_connected(2, 1, tracker, |_i, _o| 0.5)
     }
 
+    struct FixedPolicy {
+        choose_left_matching: bool,
+        choose_left_equal_unmatched: bool,
+        enable_if_either_parent_disabled: bool,
+    }
+
+    impl CrossoverPolicy for FixedPolicy {
+        fn choose_left_matching(
+            &mut self,
+            _left: &ConnectionGene,
+            _right: &ConnectionGene,
+        ) -> bool {
+            self.choose_left_matching
+        }
+
+        fn choose_left_when_equal_for_unmatched(&mut self) -> bool {
+            self.choose_left_equal_unmatched
+        }
+
+        fn enable_if_either_parent_disabled(&mut self) -> bool {
+            self.enable_if_either_parent_disabled
+        }
+    }
+
+    fn crossover_fixed(
+        left: &Genome,
+        right: &Genome,
+        fitness: ParentFitness,
+        choose_left_matching: bool,
+        choose_left_equal_unmatched: bool,
+        enable_if_either_parent_disabled: bool,
+    ) -> Genome {
+        let mut policy = FixedPolicy {
+            choose_left_matching,
+            choose_left_equal_unmatched,
+            enable_if_either_parent_disabled,
+        };
+
+        Genome::crossover_with_policy(left, right, fitness, &mut policy).unwrap()
+    }
+
     #[test]
     fn every_new_connection_mutation_gets_unique_innovation() {
         let mut t = InnovationTracker::new();
@@ -220,15 +261,14 @@ mod tests {
             .unwrap();
         let right = base.with_perturbed_weight(first, -0.2).unwrap();
 
-        let child = Genome::crossover(
+        let child = crossover_fixed(
             &left,
             &right,
             ParentFitness::Left,
-            |_l, _r| false, // take right for matching genes
-            || false,       // irrelevant for this test
-            || true,        // keep enabled when disabled in either parent
-        )
-        .unwrap();
+            false, // take right for matching genes
+            false, // irrelevant in this test
+            true,  // when exactly one parent disabled, keep enabled
+        );
 
         assert_eq!(child.connection_count(), left.connection_count());
 
@@ -249,27 +289,25 @@ mod tests {
         let left = base.with_added_node(&mut t, split).unwrap(); // split gene disabled
         let right = base.clone(); // split gene enabled
 
-        let child_disabled = Genome::crossover(
+        let child_disabled = crossover_fixed(
             &left,
             &right,
             ParentFitness::Equal,
-            |_l, _r| false, // inherit matching from right (enabled in source)
-            || true,
-            || false, // force disabled when either parent disabled
-        )
-        .unwrap();
+            false, // inherit matching from right
+            true,
+            false, // when exactly one parent disabled, force disabled
+        );
 
         assert!(!child_disabled.connection(split).unwrap().enabled);
 
-        let child_enabled = Genome::crossover(
+        let child_enabled = crossover_fixed(
             &left,
             &right,
             ParentFitness::Equal,
-            |_l, _r| false,
-            || true,
-            || true, // force enabled when either parent disabled
-        )
-        .unwrap();
+            false,
+            true,
+            true, // when exactly one parent disabled, force enabled
+        );
 
         assert!(child_enabled.connection(split).unwrap().enabled);
     }

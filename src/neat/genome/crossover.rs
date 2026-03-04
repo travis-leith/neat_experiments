@@ -43,6 +43,12 @@ where
     }
 }
 
+pub(crate) trait CrossoverPolicy {
+    fn choose_left_matching(&mut self, left: &ConnectionGene, right: &ConnectionGene) -> bool;
+    fn choose_left_when_equal_for_unmatched(&mut self) -> bool;
+    fn enable_if_either_parent_disabled(&mut self) -> bool;
+}
+
 impl Genome {
     fn validate_crossover_compatibility(left: &Genome, right: &Genome) -> Result<(), GenomeError> {
         if left.n_inputs != right.n_inputs || left.n_outputs != right.n_outputs {
@@ -81,37 +87,27 @@ impl Genome {
         Ok(merged)
     }
 
-    fn inherit_unmatched<FEqual>(
+    fn inherit_unmatched<P: CrossoverPolicy>(
         fitness: ParentFitness,
         is_left_gene: bool,
-        choose_left_when_equal: &mut FEqual,
-    ) -> bool
-    where
-        FEqual: FnMut() -> bool,
-    {
+        policy: &mut P,
+    ) -> bool {
         match fitness {
             ParentFitness::Left => is_left_gene,
             ParentFitness::Right => !is_left_gene,
             ParentFitness::Equal => {
-                let choose_left = choose_left_when_equal();
+                let choose_left = policy.choose_left_when_equal_for_unmatched();
                 (is_left_gene && choose_left) || (!is_left_gene && !choose_left)
             }
         }
     }
 
-    pub fn crossover<FMatch, FEqual, FDisabled>(
+    pub(crate) fn crossover_with_policy<P: CrossoverPolicy>(
         left: &Genome,
         right: &Genome,
         fitness: ParentFitness,
-        mut choose_left_matching: FMatch,
-        mut choose_left_when_equal_for_unmatched: FEqual,
-        mut enable_if_either_parent_disabled: FDisabled,
-    ) -> Result<Self, GenomeError>
-    where
-        FMatch: FnMut(&ConnectionGene, &ConnectionGene) -> bool,
-        FEqual: FnMut() -> bool,
-        FDisabled: FnMut() -> bool,
-    {
+        policy: &mut P,
+    ) -> Result<Self, GenomeError> {
         Self::validate_crossover_compatibility(left, right)?;
         let nodes = Self::merged_nodes_for_crossover(left, right)?;
 
@@ -125,30 +121,25 @@ impl Genome {
 
         for_each_aligned_by_innovation(left, right, |aligned| match aligned {
             Alignment::Both(l, r) => {
-                let mut inherited = if choose_left_matching(l, r) {
+                let mut inherited = if policy.choose_left_matching(l, r) {
                     l.clone()
                 } else {
                     r.clone()
                 };
 
-                if !l.enabled || !r.enabled {
-                    inherited.enabled = enable_if_either_parent_disabled();
+                if l.enabled ^ r.enabled {
+                    inherited.enabled = policy.enable_if_either_parent_disabled();
                 }
 
                 child.insert_connection_gene(inherited);
             }
             Alignment::Left(l) => {
-                if Self::inherit_unmatched(fitness, true, &mut choose_left_when_equal_for_unmatched)
-                {
+                if Self::inherit_unmatched(fitness, true, policy) {
                     child.insert_connection_gene(l.clone());
                 }
             }
             Alignment::Right(r) => {
-                if Self::inherit_unmatched(
-                    fitness,
-                    false,
-                    &mut choose_left_when_equal_for_unmatched,
-                ) {
+                if Self::inherit_unmatched(fitness, false, policy) {
                     child.insert_connection_gene(r.clone());
                 }
             }

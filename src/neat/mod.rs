@@ -1,8 +1,11 @@
 pub mod common;
+pub mod evolution;
 pub mod genome;
 pub mod genome_old;
 pub mod organism;
 pub mod phenome;
 pub mod phenome_old;
 pub mod population;
+pub mod population_old;
+pub mod species;
 pub mod vector;
