@@ -7,7 +7,7 @@ mod tests {
     use super::super::types::*;
 
     fn base_tracker() -> InnovationTracker {
-        InnovationTracker::new(NodeId(3)) // with 2 inputs + 1 output, next hidden starts at 3
+        InnovationTracker::new() // with 2 inputs + 1 output
     }
 
     fn base_genome(tracker: &mut InnovationTracker) -> Genome {
@@ -16,7 +16,7 @@ mod tests {
 
     #[test]
     fn every_new_connection_mutation_gets_unique_innovation() {
-        let mut t = InnovationTracker::new(NodeId(4));
+        let mut t = InnovationTracker::new();
         let base = Genome::minimal_fully_connected(2, 2, &mut t, |_i, _o| 0.0);
 
         let key = ConnectionKey {
@@ -86,7 +86,7 @@ mod tests {
     }
     #[test]
     fn add_connection_adds_new_gene_and_duplicate_fails() {
-        let mut t = InnovationTracker::new(NodeId(4));
+        let mut t = InnovationTracker::new();
         let g = Genome::minimal_fully_connected(2, 2, &mut t, |_i, _o| 0.0);
 
         let g2 = g
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn apply_mutations_pipeline_works() {
-        let mut t = InnovationTracker::new(NodeId(4));
+        let mut t = InnovationTracker::new();
         let g = Genome::minimal_fully_connected(2, 2, &mut t, |_i, _o| 0.0);
 
         let first = g.innovations().next().unwrap();
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn crossover_inherits_matching_and_fitter_unmatched_genes() {
-        let mut t = InnovationTracker::new(NodeId(4));
+        let mut t = InnovationTracker::new();
         let base = Genome::minimal_fully_connected(2, 2, &mut t, |_i, _o| 0.0);
 
         let first = base.innovations().next().unwrap();

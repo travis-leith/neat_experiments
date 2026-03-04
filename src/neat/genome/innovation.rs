@@ -16,10 +16,10 @@ pub struct InnovationTracker {
 }
 
 impl InnovationTracker {
-    pub fn new(start_node_id: NodeId) -> Self {
+    pub fn new() -> Self {
         Self {
             next_innovation: 1,
-            next_node_id: start_node_id.0,
+            next_node_id: 0,
             io_layout: None,
         }
     }

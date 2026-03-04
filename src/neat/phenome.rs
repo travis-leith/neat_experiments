@@ -671,9 +671,10 @@ mod tests {
     use crate::neat::genome::innovation::InnovationTracker;
     use crate::neat::genome::mutation::Mutation;
     use crate::neat::genome::types::{ConnectionKey, Genome, Innovation, NodeId};
+    use assert_approx_eq::assert_approx_eq;
 
     fn base_genome() -> (InnovationTracker, Genome) {
-        let mut t = InnovationTracker::new(NodeId(2));
+        let mut t = InnovationTracker::new();
         let g = Genome::minimal_fully_connected(1, 1, &mut t, |_i, _o| 1.0);
         (t, g)
     }
@@ -718,7 +719,7 @@ mod tests {
 
     #[test]
     fn apply_mutations_then_activate() {
-        let mut t = InnovationTracker::new(NodeId(3));
+        let mut t = InnovationTracker::new();
         let g0 = Genome::minimal_fully_connected(2, 1, &mut t, |_i, _o| 1.0);
         let first = g0.innovations().next().unwrap();
 
@@ -744,7 +745,7 @@ mod tests {
 
     #[test]
     fn feedforward_activation_applies_relu_after_accumulation() {
-        let mut t = InnovationTracker::new(NodeId(3));
+        let mut t = InnovationTracker::new();
         let g = Genome::minimal_fully_connected(2, 1, &mut t, |_i, _o| 1.0);
 
         let mut p = Phenome::from_genome(&g).unwrap();
@@ -789,7 +790,7 @@ mod tests {
     }
 
     fn genome_sample_feed_forward_1() -> Genome {
-        let mut t = InnovationTracker::new(NodeId(0));
+        let mut t = InnovationTracker::new();
         let mut g = Genome::minimal_fully_connected(2, 2, &mut t, |_i, _o| 0.);
 
         let new_node_mutations = vec![
@@ -843,7 +844,7 @@ mod tests {
     }
 
     fn dead_ends_1() -> Genome {
-        let mut t = InnovationTracker::new(NodeId(0));
+        let mut t = InnovationTracker::new();
         let mut g = Genome::minimal_fully_connected(2, 2, &mut t, |_i, _o| 0.);
 
         let add_node_mutations = vec![
@@ -892,5 +893,76 @@ mod tests {
             .audit_log()
             .iter()
             .any(|line| line.contains("component 5")));
+    }
+
+    fn genome_sample_recurrent_1() -> Genome {
+        let mut t = InnovationTracker::new();
+        let mut g = Genome::minimal_fully_connected(2, 1, &mut t, |_i, _o| 0.);
+        let mutations = vec![
+            get_add_node_mutation(&g, NodeId(0), NodeId(2)),
+            get_add_node_mutation(&g, NodeId(1), NodeId(2)),
+        ];
+        g = g.apply_mutations(&mut t, &mutations).unwrap();
+
+        let mutations = vec![
+            get_disable_mutation(&g, NodeId(0), NodeId(3)),
+            get_add_connection_mutation(NodeId(1), NodeId(2), 0.0),
+            get_add_node_mutation(&g, NodeId(1), NodeId(2)),
+        ];
+
+        g = g.apply_mutations(&mut t, &mutations).unwrap();
+
+        let mutations = vec![
+            get_add_connection_mutation(NodeId(5), NodeId(4), 0.0),
+            get_add_connection_mutation(NodeId(4), NodeId(3), 0.0),
+            get_add_connection_mutation(NodeId(0), NodeId(4), 0.0),
+            get_add_connection_mutation(NodeId(3), NodeId(5), 0.0),
+            get_disable_mutation(&g, NodeId(4), NodeId(2)),
+            get_disable_mutation(&g, NodeId(1), NodeId(5)),
+        ];
+        g = g.apply_mutations(&mut t, &mutations).unwrap();
+
+        let mutations = vec![
+            get_weight_adjust_mutation(&g, NodeId(1), NodeId(4), -1.8),
+            get_weight_adjust_mutation(&g, NodeId(0), NodeId(4), -0.8),
+            get_weight_adjust_mutation(&g, NodeId(3), NodeId(2), 0.9),
+            get_weight_adjust_mutation(&g, NodeId(4), NodeId(3), 0.1),
+            get_weight_adjust_mutation(&g, NodeId(5), NodeId(2), -0.4),
+            get_weight_adjust_mutation(&g, NodeId(3), NodeId(5), 0.5),
+            get_weight_adjust_mutation(&g, NodeId(5), NodeId(4), -0.1),
+        ];
+
+        g.apply_mutations(&mut t, &mutations).unwrap()
+    }
+
+    #[test]
+    fn test_recurrent() {
+        let genome = genome_sample_recurrent_1();
+        let mut p = Phenome::from_genome_with_config(
+            &genome,
+            ActivationConfig {
+                recurrent_iterations: 100,
+                recurrent_epsilon: 1e-8,
+                logging_enabled: true,
+            },
+        )
+        .unwrap();
+
+        // let mermaid = p.to_mermaid(false);
+        // println!("{}", mermaid);
+
+        let output = p.activate(&vec![-0.9, 0.6]).unwrap();
+        println!("{:?}", output);
+        assert_approx_eq!(output[0], 0.016716);
+
+        // for line in p.audit_log() {
+        //     println!("{}", line);
+        // }
+
+        // the recurrent component should converge to a fixed point
+        assert!(p
+            .audit_log()
+            .iter()
+            .any(|line| line.contains("recurrent converged at iter")));
     }
 }

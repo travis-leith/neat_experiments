@@ -33,8 +33,21 @@ impl Genome {
         self.validate_connection_endpoints(in_node, out_node)?;
 
         let key = ConnectionKey { in_node, out_node };
-        if self.connection_to_innovation.contains_key(&key) {
-            return Err(GenomeError::DuplicateConnection(key));
+
+        if let Some(&innovation) = self.connection_to_innovation.get(&key) {
+            let mut next = self.clone();
+            let gene = next
+                .connections_by_innovation
+                .get_mut(&innovation)
+                .ok_or(GenomeError::UnknownInnovation(innovation))?;
+
+            if gene.enabled {
+                return Err(GenomeError::DuplicateConnection(key));
+            }
+
+            gene.enabled = true;
+            gene.weight = weight;
+            return Ok(next);
         }
 
         let innovation = tracker.next_connection_innovation();
