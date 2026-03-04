@@ -230,6 +230,74 @@ fn build_plan(node_count: usize, edges: &[Edge]) -> Vec<PlannedComponent> {
         .collect::<Vec<_>>()
 }
 
+fn compute_can_reach_output(
+    node_count: usize,
+    output_indices: &[usize],
+    edges: &[Edge],
+) -> Vec<bool> {
+    let mut reverse = vec![Vec::<usize>::new(); node_count];
+    for e in edges {
+        reverse[e.dst].push(e.src);
+    }
+
+    let mut can_reach = vec![false; node_count];
+    let mut queue = VecDeque::new();
+
+    for &out in output_indices {
+        if !can_reach[out] {
+            can_reach[out] = true;
+            queue.push_back(out);
+        }
+    }
+
+    while let Some(dst) = queue.pop_front() {
+        for &src in &reverse[dst] {
+            if !can_reach[src] {
+                can_reach[src] = true;
+                queue.push_back(src);
+            }
+        }
+    }
+
+    can_reach
+}
+
+fn build_active_component_indices(
+    components: &[PlannedComponent],
+    can_reach_output: &[bool],
+) -> Vec<usize> {
+    components
+        .iter()
+        .enumerate()
+        .filter_map(|(cid, comp)| {
+            comp.nodes
+                .iter()
+                .any(|&n| can_reach_output[n])
+                .then_some(cid)
+        })
+        .collect::<Vec<_>>()
+}
+
+fn build_active_non_sensor_nodes(
+    components: &[PlannedComponent],
+    active_component_indices: &[usize],
+    node_kinds: &[NodeKind],
+) -> Vec<usize> {
+    let mut seen = vec![false; node_kinds.len()];
+    let mut active = Vec::new();
+
+    for &cid in active_component_indices {
+        for &n in &components[cid].nodes {
+            if node_kinds[n] != NodeKind::Sensor && !seen[n] {
+                seen[n] = true;
+                active.push(n);
+            }
+        }
+    }
+
+    active
+}
+
 #[derive(Debug, Clone)]
 pub struct Phenome {
     node_ids: Vec<NodeId>,
@@ -237,6 +305,8 @@ pub struct Phenome {
     input_indices: Vec<usize>,
     output_indices: Vec<usize>,
     components: Vec<PlannedComponent>,
+    active_component_indices: Vec<usize>,
+    active_non_sensor_nodes: Vec<usize>,
     config: ActivationConfig,
     state: Vec<f64>,
     scratch: Vec<f64>,
@@ -267,12 +337,20 @@ impl Phenome {
             .filter_map(|(i, _)| (node_kinds[i] == NodeKind::Output).then_some(i))
             .collect::<Vec<_>>();
 
+        let can_reach_output = compute_can_reach_output(node_ids.len(), &output_indices, &edges);
+        let active_component_indices =
+            build_active_component_indices(&components, &can_reach_output);
+        let active_non_sensor_nodes =
+            build_active_non_sensor_nodes(&components, &active_component_indices, &node_kinds);
+
         Ok(Self {
             node_ids,
             node_kinds,
             input_indices,
             output_indices,
             components,
+            active_component_indices,
+            active_non_sensor_nodes,
             config,
             state: vec![0.0; genome.nodes.len()],
             scratch: vec![0.0; genome.nodes.len()],
@@ -280,10 +358,8 @@ impl Phenome {
     }
 
     fn reset_non_sensor_state(&mut self) {
-        for (i, kind) in self.node_kinds.iter().enumerate() {
-            if *kind != NodeKind::Sensor {
-                self.state[i] = 0.0;
-            }
+        for &i in &self.active_non_sensor_nodes {
+            self.state[i] = 0.0;
         }
     }
 
@@ -364,8 +440,10 @@ impl Phenome {
         self.reset_non_sensor_state();
         self.set_inputs(inputs)?;
 
-        for i in 0..self.components.len() {
-            let comp = self.components[i].clone();
+        for i in 0..self.active_component_indices.len() {
+            let cid = self.active_component_indices[i];
+            let comp = self.components[cid].clone();
+
             if comp.recurrent {
                 self.activate_recurrent_component(&comp);
             } else {
@@ -390,23 +468,12 @@ mod tests {
     use super::*;
     use crate::neat::genome::innovation::InnovationTracker;
     use crate::neat::genome::mutation::Mutation;
-    use crate::neat::genome::types::{Genome, Innovation, NodeId};
+    use crate::neat::genome::types::{ConnectionKey, Genome, Innovation, NodeId};
 
     fn base_genome() -> (InnovationTracker, Genome) {
         let mut t = InnovationTracker::new(NodeId(2));
         let g = Genome::minimal_fully_connected(1, 1, &mut t, |_i, _o| 1.0);
         (t, g)
-    }
-
-    #[test]
-    fn feedforward_activation_uses_relu_per_connection() {
-        let mut t = InnovationTracker::new(NodeId(3));
-        let g = Genome::minimal_fully_connected(2, 1, &mut t, |_i, _o| 1.0);
-
-        let mut p = Phenome::from_genome(&g).unwrap();
-        let out = p.activate(&[2.0, -3.0]).unwrap();
-        assert_eq!(out.len(), 1);
-        assert!((out[0] - 2.0).abs() < 1e-12); // relu(2*1) + relu(-3*1)
     }
 
     #[test]
@@ -481,5 +548,101 @@ mod tests {
         let out = p.activate(&[2.0, -3.0]).unwrap();
         assert_eq!(out.len(), 1);
         assert!((out[0] - 0.0).abs() < 1e-12); // relu((2*1) + (-3*1))
+    }
+
+    // fn genome_sample_feed_forward_1() -> Genome {
+    //     Genome::create(
+    //         vec![
+    //             Gene::create(0, 4, -0.1, true),
+    //             Gene::create(4, 3, 0.6, true),
+    //             Gene::create(1, 5, -0.8, true),
+    //             Gene::create(5, 3, -0.9, true),
+    //             Gene::create(0, 5, 0.6, true),
+    //             Gene::create(5, 2, 0.4, true),
+    //         ],
+    //         2,
+    //         2,
+    //     )
+    // }
+
+    fn genome_sample_feed_forward_1() -> Genome {
+        let mut t = InnovationTracker::new(NodeId(0));
+        let mut g = Genome::minimal_fully_connected(2, 2, &mut t, |_i, _o| 0.);
+
+        fn get_innovation(g: &Genome, in_node: NodeId, out_node: NodeId) -> Innovation {
+            let key = ConnectionKey { in_node, out_node };
+            g.connection_to_innovation.get(&key).copied().unwrap()
+        }
+
+        let innovation_0_3 = get_innovation(&g, NodeId(0), NodeId(3));
+        let innovation_1_3 = get_innovation(&g, NodeId(1), NodeId(3));
+
+        let new_node_mutations = vec![
+            Mutation::AddNode {
+                split_innovation: innovation_0_3,
+            },
+            Mutation::AddNode {
+                split_innovation: innovation_1_3,
+            },
+        ];
+
+        g = g.apply_mutations(&mut t, &new_node_mutations).unwrap();
+
+        let innovation_0_2 = get_innovation(&g, NodeId(0), NodeId(2));
+
+        g = g
+            .apply_mutation(
+                &mut t,
+                &Mutation::DisableConnection {
+                    innovation: innovation_0_2,
+                },
+            )
+            .unwrap();
+
+        let add_connection_mutations = vec![
+            Mutation::AddConnection {
+                in_node: NodeId(0),
+                out_node: NodeId(5),
+                weight: 0.6,
+            },
+            Mutation::AddConnection {
+                in_node: NodeId(5),
+                out_node: NodeId(2),
+                weight: 0.4,
+            },
+        ];
+
+        g = g
+            .apply_mutations(&mut t, &add_connection_mutations)
+            .unwrap();
+
+        fn get_weight_adjust_mutation(
+            g: &Genome,
+            in_node: NodeId,
+            out_node: NodeId,
+            delta: f64,
+        ) -> Mutation {
+            let innovation = get_innovation(g, in_node, out_node);
+            Mutation::PerturbWeight { innovation, delta }
+        }
+
+        let weight_adjust_mutations = vec![
+            get_weight_adjust_mutation(&g, NodeId(0), NodeId(4), -0.1),
+            get_weight_adjust_mutation(&g, NodeId(1), NodeId(5), -0.8),
+            get_weight_adjust_mutation(&g, NodeId(4), NodeId(3), 0.6),
+            get_weight_adjust_mutation(&g, NodeId(5), NodeId(3), -0.9),
+        ];
+
+        g.apply_mutations(&mut t, &weight_adjust_mutations).unwrap()
+    }
+
+    #[test]
+    fn feed_forward() {
+        let genome = genome_sample_feed_forward_1();
+        let mut p = Phenome::from_genome(&genome).unwrap();
+        let output = p.activate(&vec![0.5, -0.2]).unwrap();
+        println!("{:?}", output);
+        assert!((output[0] - 0.184).abs() < 1e-12);
+        assert!((output[1] - 0.0).abs() < 1e-12);
     }
 }

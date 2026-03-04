@@ -329,4 +329,74 @@ mod tests {
             _ => panic!("expected MissingNode"),
         }
     }
+
+    #[test]
+    fn disable_connection_mutation_disables_gene() {
+        let mut t = base_tracker();
+        let g = base_genome(&mut t);
+        let i = g.innovations().next().unwrap();
+
+        let g2 = g
+            .apply_mutation(&mut t, &Mutation::DisableConnection { innovation: i })
+            .unwrap();
+
+        assert!(g.connection(i).unwrap().enabled);
+        assert!(!g2.connection(i).unwrap().enabled);
+        assert_eq!(g2.connection_count(), g.connection_count());
+    }
+
+    #[test]
+    fn disable_connection_mutation_rejects_unknown_and_already_disabled() {
+        let mut t = base_tracker();
+        let g = base_genome(&mut t);
+        let i = g.innovations().next().unwrap();
+
+        let unknown = g
+            .apply_mutation(
+                &mut t,
+                &Mutation::DisableConnection {
+                    innovation: Innovation(u64::MAX),
+                },
+            )
+            .err()
+            .unwrap();
+
+        match unknown {
+            GenomeError::UnknownInnovation(_) => {}
+            _ => panic!("expected UnknownInnovation"),
+        }
+
+        let g2 = g
+            .apply_mutation(&mut t, &Mutation::DisableConnection { innovation: i })
+            .unwrap();
+
+        let already_disabled = g2
+            .apply_mutation(&mut t, &Mutation::DisableConnection { innovation: i })
+            .err()
+            .unwrap();
+
+        match already_disabled {
+            GenomeError::ConnectionAlreadyDisabled(x) => assert_eq!(x, i),
+            _ => panic!("expected ConnectionAlreadyDisabled"),
+        }
+    }
+
+    #[test]
+    fn apply_mutation_add_node_variant_works() {
+        let mut t = base_tracker();
+        let g = base_genome(&mut t);
+        let split = g.innovations().next().unwrap();
+
+        let g2 = g
+            .apply_mutation(
+                &mut t,
+                &Mutation::AddNode {
+                    split_innovation: split,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(g2.connection_count(), g.connection_count() + 2);
+        assert!(!g2.connection(split).unwrap().enabled);
+    }
 }

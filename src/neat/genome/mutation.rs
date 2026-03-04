@@ -17,6 +17,9 @@ pub enum Mutation {
         innovation: Innovation,
         delta: f64,
     },
+    DisableConnection {
+        innovation: Innovation,
+    },
 }
 
 impl Genome {
@@ -114,6 +117,21 @@ impl Genome {
         Ok(next)
     }
 
+    pub fn with_disabled_connection(&self, innovation: Innovation) -> Result<Self, GenomeError> {
+        let mut next = self.clone();
+        let gene = next
+            .connections_by_innovation
+            .get_mut(&innovation)
+            .ok_or(GenomeError::UnknownInnovation(innovation))?;
+
+        if !gene.enabled {
+            return Err(GenomeError::ConnectionAlreadyDisabled(innovation));
+        }
+
+        gene.enabled = false;
+        Ok(next)
+    }
+
     pub fn apply_mutation(
         &self,
         tracker: &mut InnovationTracker,
@@ -130,6 +148,9 @@ impl Genome {
             }
             Mutation::PerturbWeight { innovation, delta } => {
                 self.with_perturbed_weight(*innovation, *delta)
+            }
+            Mutation::DisableConnection { innovation } => {
+                self.with_disabled_connection(*innovation)
             }
         }
     }
