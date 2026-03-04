@@ -14,6 +14,7 @@ struct Edge {
     src: usize,
     dst: usize,
     weight: f64,
+    enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +29,7 @@ struct PlannedComponent {
 pub struct ActivationConfig {
     pub recurrent_iterations: usize,
     pub recurrent_epsilon: f64,
+    pub logging_enabled: bool,
 }
 
 impl Default for ActivationConfig {
@@ -35,6 +37,7 @@ impl Default for ActivationConfig {
         Self {
             recurrent_iterations: 12,
             recurrent_epsilon: 1e-9,
+            logging_enabled: false,
         }
     }
 }
@@ -59,11 +62,10 @@ fn build_node_index(genome: &Genome) -> (Vec<NodeId>, Vec<NodeKind>, HashMap<Nod
     (node_ids, node_kinds, node_index)
 }
 
-fn build_enabled_edges(genome: &Genome, node_index: &HashMap<NodeId, usize>) -> Vec<Edge> {
+fn build_all_edges(genome: &Genome, node_index: &HashMap<NodeId, usize>) -> Vec<Edge> {
     genome
         .connections_by_innovation
         .values()
-        .filter(|g| g.enabled)
         .map(|g| Edge {
             src: *node_index
                 .get(&g.key.in_node)
@@ -72,7 +74,16 @@ fn build_enabled_edges(genome: &Genome, node_index: &HashMap<NodeId, usize>) -> 
                 .get(&g.key.out_node)
                 .expect("destination node must exist"),
             weight: g.weight,
+            enabled: g.enabled,
         })
+        .collect::<Vec<_>>()
+}
+
+fn build_enabled_edges(all_edges: &[Edge]) -> Vec<Edge> {
+    all_edges
+        .iter()
+        .copied()
+        .filter(|e| e.enabled)
         .collect::<Vec<_>>()
 }
 
@@ -307,9 +318,11 @@ pub struct Phenome {
     components: Vec<PlannedComponent>,
     active_component_indices: Vec<usize>,
     active_non_sensor_nodes: Vec<usize>,
+    all_edges: Vec<Edge>,
     config: ActivationConfig,
     state: Vec<f64>,
     scratch: Vec<f64>,
+    audit_log: Vec<String>,
 }
 
 impl Phenome {
@@ -322,7 +335,8 @@ impl Phenome {
         config: ActivationConfig,
     ) -> Result<Self, PhenomeError> {
         let (node_ids, node_kinds, node_index) = build_node_index(genome);
-        let edges = build_enabled_edges(genome, &node_index);
+        let all_edges = build_all_edges(genome, &node_index);
+        let edges = build_enabled_edges(&all_edges);
         let components = build_plan(node_ids.len(), &edges);
 
         let input_indices = node_ids
@@ -351,16 +365,98 @@ impl Phenome {
             components,
             active_component_indices,
             active_non_sensor_nodes,
+            all_edges,
             config,
             state: vec![0.0; genome.nodes.len()],
             scratch: vec![0.0; genome.nodes.len()],
+            audit_log: Vec::new(),
         })
+    }
+
+    fn node_label(&self, idx: usize) -> String {
+        format!("{:?}", self.node_ids[idx])
+    }
+
+    fn log_line(&mut self, line: String) {
+        if self.config.logging_enabled {
+            self.audit_log.push(line);
+        }
+    }
+
+    pub fn set_logging_enabled(&mut self, enabled: bool) {
+        self.config.logging_enabled = enabled;
+        if !enabled {
+            self.audit_log.clear();
+        }
+    }
+
+    pub fn audit_log(&self) -> &[String] {
+        &self.audit_log
+    }
+
+    pub fn take_audit_log(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.audit_log)
+    }
+
+    fn node_kind_class(kind: NodeKind) -> &'static str {
+        match kind {
+            NodeKind::Sensor => "sensor",
+            NodeKind::Output => "output",
+            NodeKind::Hidden => "internal",
+        }
+    }
+
+    pub fn to_mermaid(&self) -> String {
+        let mut lines = vec![
+            "graph TD".to_string(),
+            "classDef sensor fill:#d7f0ff,stroke:#1e88e5,stroke-width:1px;".to_string(),
+            "classDef output fill:#e8f5e9,stroke:#43a047,stroke-width:1px;".to_string(),
+            "classDef internal fill:#fff8e1,stroke:#f9a825,stroke-width:1px;".to_string(),
+        ];
+
+        for (cid, comp) in self.components.iter().enumerate() {
+            let component_kind = if comp.recurrent {
+                "recurrent"
+            } else {
+                "acyclic"
+            };
+            lines.push(format!(
+                "subgraph C{}[\"Component {} ({})\"]",
+                cid, cid, component_kind
+            ));
+            for &n in &comp.nodes {
+                lines.push(format!(
+                    "  N{}[\"{} / {:?}\"]",
+                    n,
+                    self.node_label(n),
+                    self.node_kinds[n]
+                ));
+            }
+            lines.push("end".to_string());
+        }
+
+        for e in &self.all_edges {
+            let w = format!("{:.6}", e.weight);
+            let link = if e.enabled {
+                format!("-->|{}|", w)
+            } else {
+                format!("-.->")
+            };
+            lines.push(format!("N{} {} N{}", e.src, link, e.dst));
+        }
+
+        for (i, kind) in self.node_kinds.iter().copied().enumerate() {
+            lines.push(format!("class N{} {};", i, Self::node_kind_class(kind)));
+        }
+
+        lines.join("\n")
     }
 
     fn reset_non_sensor_state(&mut self) {
         for &i in &self.active_non_sensor_nodes {
             self.state[i] = 0.0;
         }
+        self.log_line("reset_non_sensor_state".to_string());
     }
 
     fn set_inputs(&mut self, inputs: &[f64]) -> Result<(), PhenomeError> {
@@ -371,8 +467,11 @@ impl Phenome {
             });
         }
 
-        for (x, idx) in inputs.iter().zip(self.input_indices.iter().copied()) {
+        let input_indices = self.input_indices.clone();
+        for (x, idx) in inputs.iter().zip(input_indices.into_iter()) {
             self.state[idx] = *x;
+            let line = format!("input {} ({:?}) = {:.12}", idx, self.node_ids[idx], *x);
+            self.log_line(line);
         }
 
         Ok(())
@@ -386,25 +485,58 @@ impl Phenome {
 
     fn accumulate_external_weighted_sum(&mut self, comp: &PlannedComponent) {
         for e in &comp.external_edges {
-            self.scratch[e.dst] += self.state[e.src] * e.weight;
+            let src = self.state[e.src];
+            let contribution = src * e.weight;
+            self.scratch[e.dst] += contribution;
+            self.log_line(format!(
+                "external: {}({:.12}) * w({:.12}) -> {} += {:.12} => {:.12}",
+                self.node_label(e.src),
+                src,
+                e.weight,
+                self.node_label(e.dst),
+                contribution,
+                self.scratch[e.dst]
+            ));
         }
     }
 
     fn accumulate_internal_weighted_sum(&mut self, comp: &PlannedComponent) {
         for e in &comp.internal_edges {
-            self.scratch[e.dst] += self.state[e.src] * e.weight;
+            let src = self.state[e.src];
+            let contribution = src * e.weight;
+            self.scratch[e.dst] += contribution;
+            self.log_line(format!(
+                "internal: {}({:.12}) * w({:.12}) -> {} += {:.12} => {:.12}",
+                self.node_label(e.src),
+                src,
+                e.weight,
+                self.node_label(e.dst),
+                contribution,
+                self.scratch[e.dst]
+            ));
         }
     }
 
     fn commit_component_values(&mut self, comp: &PlannedComponent) {
         for &n in &comp.nodes {
             if self.node_kinds[n] != NodeKind::Sensor {
-                self.state[n] = relu(self.scratch[n]);
+                let before = self.state[n];
+                let sum = self.scratch[n];
+                let after = relu(sum);
+                self.state[n] = after;
+                self.log_line(format!(
+                    "commit: {} relu({:.12}) => {:.12} (prev {:.12})",
+                    self.node_label(n),
+                    sum,
+                    after,
+                    before
+                ));
             }
         }
     }
 
     fn activate_acyclic_component(&mut self, comp: &PlannedComponent) {
+        self.log_line(format!("activate_acyclic_component nodes={:?}", comp.nodes));
         self.zero_component_scratch(comp);
         self.accumulate_external_weighted_sum(comp);
         self.accumulate_internal_weighted_sum(comp);
@@ -412,7 +544,12 @@ impl Phenome {
     }
 
     fn activate_recurrent_component(&mut self, comp: &PlannedComponent) {
-        for _ in 0..self.config.recurrent_iterations {
+        self.log_line(format!(
+            "activate_recurrent_component nodes={:?} max_iter={} eps={:.12}",
+            comp.nodes, self.config.recurrent_iterations, self.config.recurrent_epsilon
+        ));
+
+        for iter in 0..self.config.recurrent_iterations {
             self.zero_component_scratch(comp);
             self.accumulate_external_weighted_sum(comp);
             self.accumulate_internal_weighted_sum(comp);
@@ -422,21 +559,38 @@ impl Phenome {
                 if self.node_kinds[n] == NodeKind::Sensor {
                     continue;
                 }
+                let prev = self.state[n];
                 let next = relu(self.scratch[n]);
-                let delta = (next - self.state[n]).abs();
+                let delta = (next - prev).abs();
                 if delta > max_delta {
                     max_delta = delta;
                 }
                 self.state[n] = next;
+                self.log_line(format!(
+                    "recurrent iter {} node {} relu({:.12}) => {:.12}; delta={:.12}",
+                    iter,
+                    self.node_label(n),
+                    self.scratch[n],
+                    next,
+                    delta
+                ));
             }
 
+            self.log_line(format!(
+                "recurrent iter {} max_delta={:.12}",
+                iter, max_delta
+            ));
             if max_delta <= self.config.recurrent_epsilon {
+                self.log_line(format!("recurrent converged at iter {}", iter));
                 break;
             }
         }
     }
 
     pub fn activate(&mut self, inputs: &[f64]) -> Result<Vec<f64>, PhenomeError> {
+        self.audit_log.clear();
+        self.log_line("activate: begin".to_string());
+
         self.reset_non_sensor_state();
         self.set_inputs(inputs)?;
 
@@ -444,6 +598,7 @@ impl Phenome {
             let cid = self.active_component_indices[i];
             let comp = self.components[cid].clone();
 
+            self.log_line(format!("component {} recurrent={}", cid, comp.recurrent));
             if comp.recurrent {
                 self.activate_recurrent_component(&comp);
             } else {
@@ -451,11 +606,18 @@ impl Phenome {
             }
         }
 
-        Ok(self
-            .output_indices
-            .iter()
-            .map(|&idx| self.state[idx])
-            .collect::<Vec<_>>())
+        let output_indices = self.output_indices.clone();
+        let mut out = Vec::with_capacity(output_indices.len());
+        for idx in output_indices {
+            self.log_line(format!(
+                "output {} ({:?}) = {:.12}",
+                idx, self.node_ids[idx], self.state[idx]
+            ));
+            out.push(self.state[idx]);
+        }
+
+        self.log_line("activate: end".to_string());
+        Ok(out)
     }
 
     pub fn node_count(&self) -> usize {
@@ -491,6 +653,7 @@ mod tests {
             ActivationConfig {
                 recurrent_iterations: 4,
                 recurrent_epsilon: 0.0,
+                ..ActivationConfig::default()
             },
         )
         .unwrap();
@@ -550,21 +713,6 @@ mod tests {
         assert!((out[0] - 0.0).abs() < 1e-12); // relu((2*1) + (-3*1))
     }
 
-    // fn genome_sample_feed_forward_1() -> Genome {
-    //     Genome::create(
-    //         vec![
-    //             Gene::create(0, 4, -0.1, true),
-    //             Gene::create(4, 3, 0.6, true),
-    //             Gene::create(1, 5, -0.8, true),
-    //             Gene::create(5, 3, -0.9, true),
-    //             Gene::create(0, 5, 0.6, true),
-    //             Gene::create(5, 2, 0.4, true),
-    //         ],
-    //         2,
-    //         2,
-    //     )
-    // }
-
     fn genome_sample_feed_forward_1() -> Genome {
         let mut t = InnovationTracker::new(NodeId(0));
         let mut g = Genome::minimal_fully_connected(2, 2, &mut t, |_i, _o| 0.);
@@ -588,16 +736,17 @@ mod tests {
 
         g = g.apply_mutations(&mut t, &new_node_mutations).unwrap();
 
-        let innovation_0_2 = get_innovation(&g, NodeId(0), NodeId(2));
+        fn get_disable_mutation(g: &Genome, in_node: NodeId, out_node: NodeId) -> Mutation {
+            let innovation = get_innovation(&g, in_node, out_node);
+            Mutation::DisableConnection { innovation }
+        }
 
-        g = g
-            .apply_mutation(
-                &mut t,
-                &Mutation::DisableConnection {
-                    innovation: innovation_0_2,
-                },
-            )
-            .unwrap();
+        let disable_mutations = vec![
+            get_disable_mutation(&g, NodeId(0), NodeId(2)),
+            get_disable_mutation(&g, NodeId(1), NodeId(2)),
+        ];
+
+        g = g.apply_mutations(&mut t, &disable_mutations).unwrap();
 
         let add_connection_mutations = vec![
             Mutation::AddConnection {
@@ -627,8 +776,8 @@ mod tests {
         }
 
         let weight_adjust_mutations = vec![
-            get_weight_adjust_mutation(&g, NodeId(0), NodeId(4), -0.1),
-            get_weight_adjust_mutation(&g, NodeId(1), NodeId(5), -0.8),
+            get_weight_adjust_mutation(&g, NodeId(0), NodeId(4), -1.1),
+            get_weight_adjust_mutation(&g, NodeId(1), NodeId(5), -1.8),
             get_weight_adjust_mutation(&g, NodeId(4), NodeId(3), 0.6),
             get_weight_adjust_mutation(&g, NodeId(5), NodeId(3), -0.9),
         ];
@@ -640,8 +789,15 @@ mod tests {
     fn feed_forward() {
         let genome = genome_sample_feed_forward_1();
         let mut p = Phenome::from_genome(&genome).unwrap();
+        // p.set_logging_enabled(true);
+        // let mermaid = p.to_mermaid();
+        // println!("{}", mermaid);
         let output = p.activate(&vec![0.5, -0.2]).unwrap();
         println!("{:?}", output);
+        // print all the logs
+        for line in p.audit_log() {
+            println!("{}", line);
+        }
         assert!((output[0] - 0.184).abs() < 1e-12);
         assert!((output[1] - 0.0).abs() < 1e-12);
     }
