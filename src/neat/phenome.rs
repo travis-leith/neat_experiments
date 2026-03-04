@@ -273,19 +273,53 @@ fn compute_can_reach_output(
     can_reach
 }
 
+fn compute_reachable_from_inputs(
+    node_count: usize,
+    input_indices: &[usize],
+    edges: &[Edge],
+) -> Vec<bool> {
+    let mut forward = vec![Vec::<usize>::new(); node_count];
+    for e in edges {
+        forward[e.src].push(e.dst);
+    }
+
+    let mut reachable = vec![false; node_count];
+    let mut queue = VecDeque::new();
+
+    for &input in input_indices {
+        if !reachable[input] {
+            reachable[input] = true;
+            queue.push_back(input);
+        }
+    }
+
+    while let Some(src) = queue.pop_front() {
+        for &dst in &forward[src] {
+            if !reachable[dst] {
+                reachable[dst] = true;
+                queue.push_back(dst);
+            }
+        }
+    }
+
+    reachable
+}
+
+fn intersect_masks(a: &[bool], b: &[bool]) -> Vec<bool> {
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| *x && *y)
+        .collect::<Vec<_>>()
+}
+
 fn build_active_component_indices(
     components: &[PlannedComponent],
-    can_reach_output: &[bool],
+    active_nodes: &[bool],
 ) -> Vec<usize> {
     components
         .iter()
         .enumerate()
-        .filter_map(|(cid, comp)| {
-            comp.nodes
-                .iter()
-                .any(|&n| can_reach_output[n])
-                .then_some(cid)
-        })
+        .filter_map(|(cid, comp)| comp.nodes.iter().any(|&n| active_nodes[n]).then_some(cid))
         .collect::<Vec<_>>()
 }
 
@@ -352,8 +386,11 @@ impl Phenome {
             .collect::<Vec<_>>();
 
         let can_reach_output = compute_can_reach_output(node_ids.len(), &output_indices, &edges);
-        let active_component_indices =
-            build_active_component_indices(&components, &can_reach_output);
+        let reachable_from_inputs =
+            compute_reachable_from_inputs(node_ids.len(), &input_indices, &edges);
+        let active_nodes = intersect_masks(&can_reach_output, &reachable_from_inputs);
+
+        let active_component_indices = build_active_component_indices(&components, &active_nodes);
         let active_non_sensor_nodes =
             build_active_non_sensor_nodes(&components, &active_component_indices, &node_kinds);
 
@@ -406,7 +443,7 @@ impl Phenome {
         }
     }
 
-    pub fn to_mermaid(&self) -> String {
+    pub fn to_mermaid(&self, include_disabled: bool) -> String {
         let mut lines = vec![
             "graph TD".to_string(),
             "classDef sensor fill:#d7f0ff,stroke:#1e88e5,stroke-width:1px;".to_string(),
@@ -436,6 +473,9 @@ impl Phenome {
         }
 
         for e in &self.all_edges {
+            if !include_disabled && !e.enabled {
+                continue;
+            }
             let w = format!("{:.6}", e.weight);
             let link = if e.enabled {
                 format!("-->|{}|", w)
@@ -713,33 +753,51 @@ mod tests {
         assert!((out[0] - 0.0).abs() < 1e-12); // relu((2*1) + (-3*1))
     }
 
+    fn get_innovation(g: &Genome, in_node: NodeId, out_node: NodeId) -> Innovation {
+        let key = ConnectionKey { in_node, out_node };
+        g.connection_to_innovation.get(&key).copied().unwrap()
+    }
+
+    fn get_add_node_mutation(g: &Genome, in_node: NodeId, out_node: NodeId) -> Mutation {
+        let innovation = get_innovation(g, in_node, out_node);
+        Mutation::AddNode {
+            split_innovation: innovation,
+        }
+    }
+
+    fn get_disable_mutation(g: &Genome, in_node: NodeId, out_node: NodeId) -> Mutation {
+        let innovation = get_innovation(&g, in_node, out_node);
+        Mutation::DisableConnection { innovation }
+    }
+
+    fn get_add_connection_mutation(in_node: NodeId, out_node: NodeId, weight: f64) -> Mutation {
+        Mutation::AddConnection {
+            in_node,
+            out_node,
+            weight,
+        }
+    }
+
+    fn get_weight_adjust_mutation(
+        g: &Genome,
+        in_node: NodeId,
+        out_node: NodeId,
+        delta: f64,
+    ) -> Mutation {
+        let innovation = get_innovation(g, in_node, out_node);
+        Mutation::PerturbWeight { innovation, delta }
+    }
+
     fn genome_sample_feed_forward_1() -> Genome {
         let mut t = InnovationTracker::new(NodeId(0));
         let mut g = Genome::minimal_fully_connected(2, 2, &mut t, |_i, _o| 0.);
 
-        fn get_innovation(g: &Genome, in_node: NodeId, out_node: NodeId) -> Innovation {
-            let key = ConnectionKey { in_node, out_node };
-            g.connection_to_innovation.get(&key).copied().unwrap()
-        }
-
-        let innovation_0_3 = get_innovation(&g, NodeId(0), NodeId(3));
-        let innovation_1_3 = get_innovation(&g, NodeId(1), NodeId(3));
-
         let new_node_mutations = vec![
-            Mutation::AddNode {
-                split_innovation: innovation_0_3,
-            },
-            Mutation::AddNode {
-                split_innovation: innovation_1_3,
-            },
+            get_add_node_mutation(&g, NodeId(0), NodeId(3)),
+            get_add_node_mutation(&g, NodeId(1), NodeId(3)),
         ];
 
         g = g.apply_mutations(&mut t, &new_node_mutations).unwrap();
-
-        fn get_disable_mutation(g: &Genome, in_node: NodeId, out_node: NodeId) -> Mutation {
-            let innovation = get_innovation(&g, in_node, out_node);
-            Mutation::DisableConnection { innovation }
-        }
 
         let disable_mutations = vec![
             get_disable_mutation(&g, NodeId(0), NodeId(2)),
@@ -749,31 +807,13 @@ mod tests {
         g = g.apply_mutations(&mut t, &disable_mutations).unwrap();
 
         let add_connection_mutations = vec![
-            Mutation::AddConnection {
-                in_node: NodeId(0),
-                out_node: NodeId(5),
-                weight: 0.6,
-            },
-            Mutation::AddConnection {
-                in_node: NodeId(5),
-                out_node: NodeId(2),
-                weight: 0.4,
-            },
+            get_add_connection_mutation(NodeId(0), NodeId(5), 0.6),
+            get_add_connection_mutation(NodeId(5), NodeId(2), 0.4),
         ];
 
         g = g
             .apply_mutations(&mut t, &add_connection_mutations)
             .unwrap();
-
-        fn get_weight_adjust_mutation(
-            g: &Genome,
-            in_node: NodeId,
-            out_node: NodeId,
-            delta: f64,
-        ) -> Mutation {
-            let innovation = get_innovation(g, in_node, out_node);
-            Mutation::PerturbWeight { innovation, delta }
-        }
 
         let weight_adjust_mutations = vec![
             get_weight_adjust_mutation(&g, NodeId(0), NodeId(4), -1.1),
@@ -800,5 +840,57 @@ mod tests {
         }
         assert!((output[0] - 0.184).abs() < 1e-12);
         assert!((output[1] - 0.0).abs() < 1e-12);
+    }
+
+    fn dead_ends_1() -> Genome {
+        let mut t = InnovationTracker::new(NodeId(0));
+        let mut g = Genome::minimal_fully_connected(2, 2, &mut t, |_i, _o| 0.);
+
+        let add_node_mutations = vec![
+            get_add_node_mutation(&g, NodeId(0), NodeId(3)),
+            get_add_node_mutation(&g, NodeId(0), NodeId(2)),
+            get_add_node_mutation(&g, NodeId(1), NodeId(3)),
+        ];
+
+        g = g.apply_mutations(&mut t, &add_node_mutations).unwrap();
+
+        let mutations_rest = vec![
+            get_disable_mutation(&g, NodeId(1), NodeId(2)),
+            get_disable_mutation(&g, NodeId(0), NodeId(5)),
+            get_disable_mutation(&g, NodeId(5), NodeId(2)),
+            get_disable_mutation(&g, NodeId(1), NodeId(6)),
+            get_disable_mutation(&g, NodeId(6), NodeId(3)),
+            get_add_connection_mutation(NodeId(6), NodeId(4), 0.),
+            get_add_connection_mutation(NodeId(4), NodeId(5), 0.),
+            get_add_connection_mutation(NodeId(4), NodeId(2), 0.),
+            get_add_connection_mutation(NodeId(1), NodeId(4), 0.),
+        ];
+
+        g.apply_mutations(&mut t, &mutations_rest).unwrap()
+    }
+
+    #[test]
+    fn test_dead_ends() {
+        let genome = dead_ends_1();
+        let mut p = Phenome::from_genome(&genome).unwrap();
+        p.set_logging_enabled(true);
+        let mermaid = p.to_mermaid(false);
+        println!("{}", mermaid);
+        let output = p.activate(&vec![0.5, -0.2]).unwrap();
+        println!("{:?}", output);
+
+        for line in p.audit_log() {
+            println!("{}", line);
+        }
+
+        // component 2 is a dead source, component 5 is a dead end, make sure they are not in the logs
+        assert!(!p
+            .audit_log()
+            .iter()
+            .any(|line| line.contains("component 2")));
+        assert!(!p
+            .audit_log()
+            .iter()
+            .any(|line| line.contains("component 5")));
     }
 }

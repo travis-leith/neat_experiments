@@ -7,3 +7,4 @@ The become keyword is available now for tail calls, so you can write recursive f
 Zero cost abstractions that make code safer and easier to read are encouraged. For example: type wrappers (often called newtypes) that prevent mixing up different types of data, or that provide additional functionality.
 Code ordering should be F# style: nothing can be invoked or referenced before it is defined. This means that helper functions should be defined before the main function that uses them, and that the main function should be defined at the end of the file.
 Always keep the public surface as simple and small as possible. If a function or type is only used internally, it should not be exposed publicly.
+Often, the best change to make is to remove code.
