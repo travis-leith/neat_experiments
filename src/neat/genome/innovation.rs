@@ -1,6 +1,7 @@
 use super::types::{Innovation, NodeId};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct IoLayout {
     n_inputs: usize,
     n_outputs: usize,
@@ -8,7 +9,7 @@ struct IoLayout {
     output_nodes: Vec<NodeId>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InnovationTracker {
     next_innovation: u64,
     next_node_id: u32,

@@ -1,10 +1,11 @@
 use super::genome::distance::genetic_distance;
 use super::genome::types::{DistanceCoefficients, Genome};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct SpeciesId(pub u64);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Species {
     pub id: SpeciesId,
     pub representative: Genome,
@@ -13,7 +14,7 @@ pub struct Species {
     pub best_fitness: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeciationConfig {
     pub compatibility_threshold: f64,
     pub distance_coefficients: DistanceCoefficients,

@@ -8,6 +8,7 @@ use super::species::{
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -43,7 +44,7 @@ impl Organism {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvolutionConfig {
     pub population_size: usize,
     pub speciation: SpeciationConfig,
@@ -69,7 +70,7 @@ pub struct Match {
 }
 
 /// Describes which organisms should be grouped together for competition.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchConfig {
     /// How many organisms per match.
     pub players_per_match: usize,
@@ -136,6 +137,19 @@ fn build_organisms(
         .collect()
 }
 
+/// Serializable snapshot of evolution state, suitable for persistence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvolutionCheckpoint {
+    pub config: EvolutionConfig,
+    pub match_config: MatchConfig,
+    pub tracker: InnovationTracker,
+    pub genomes: Vec<Genome>,
+    pub species: Vec<Species>,
+    pub next_species_id: u64,
+    pub generation: usize,
+    pub rng_seed_state: Vec<u8>,
+}
+
 pub struct Evolution {
     config: EvolutionConfig,
     match_config: MatchConfig,
@@ -178,6 +192,47 @@ impl Evolution {
         }
     }
 
+    /// Save current state to a checkpoint that can be serialized.
+    pub fn save_checkpoint(&self) -> EvolutionCheckpoint {
+        // Serialize the RNG by re-seeding from a derived value.
+        // StdRng doesn't expose internal state directly, so we snapshot
+        // by generating a seed block from the current RNG state.
+        let mut rng_clone = self.rng.clone();
+        let mut seed_bytes = vec![0u8; 32];
+        rng_clone.fill_bytes(&mut seed_bytes);
+
+        EvolutionCheckpoint {
+            config: self.config.clone(),
+            match_config: self.match_config.clone(),
+            tracker: self.tracker.clone(),
+            genomes: self.genomes.clone(),
+            species: self.species.clone(),
+            next_species_id: self.next_species_id,
+            generation: self.generation,
+            rng_seed_state: seed_bytes,
+        }
+    }
+
+    /// Restore from a checkpoint.
+    pub fn from_checkpoint(checkpoint: EvolutionCheckpoint) -> Self {
+        let seed_array: [u8; 32] = checkpoint
+            .rng_seed_state
+            .try_into()
+            .expect("rng seed state must be 32 bytes");
+        let rng = StdRng::from_seed(seed_array);
+
+        Self {
+            config: checkpoint.config,
+            match_config: checkpoint.match_config,
+            tracker: checkpoint.tracker,
+            genomes: checkpoint.genomes,
+            species: checkpoint.species,
+            next_species_id: checkpoint.next_species_id,
+            generation: checkpoint.generation,
+            rng,
+        }
+    }
+
     pub fn generation(&self) -> usize {
         self.generation
     }
@@ -190,12 +245,28 @@ impl Evolution {
         &self.species
     }
 
+    pub fn config(&self) -> &EvolutionConfig {
+        &self.config
+    }
+
+    /// Return the genome with the highest fitness from the last evaluation,
+    /// or the first genome if no evaluation has been done.
+    pub fn fittest_genome(&self, fitnesses: &[f64]) -> Genome {
+        let best_idx = fitnesses
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        self.genomes[best_idx].clone()
+    }
+
     /// Run one generation of competitive evolution.
     ///
     /// `evaluate_match` is called in parallel for each match. It receives a `&mut Match`
     /// and should run the game, calling `organism.activate()` and `organism.add_fitness()`
     /// as needed.
-    pub fn run_generation<F>(&mut self, evaluate_match: F) -> GenerationReport
+    pub fn run_generation<F>(&mut self, evaluate_match: F) -> (GenerationReport, Vec<f64>)
     where
         F: Fn(&mut Match) + Send + Sync,
     {
@@ -248,7 +319,7 @@ impl Evolution {
         self.genomes = next_genomes;
         self.generation += 1;
 
-        report
+        (report, fitnesses)
     }
 
     fn evaluate_population<F>(&mut self, evaluate_match: &F) -> Vec<f64>
@@ -328,14 +399,22 @@ impl Evolution {
     }
 
     /// Run multiple generations, calling the callback after each.
-    pub fn run<F, C>(&mut self, generations: usize, evaluate_match: F, mut on_generation: C)
+    pub fn run<F, C>(
+        &mut self,
+        generations: usize,
+        evaluate_match: F,
+        mut on_generation: C,
+    ) -> Vec<f64>
     where
         F: Fn(&mut Match) + Send + Sync,
         C: FnMut(&GenerationReport, &Evolution),
     {
+        let mut last_fitnesses = vec![0.0; self.genomes.len()];
         for _ in 0..generations {
-            let report = self.run_generation(&evaluate_match);
+            let (report, fitnesses) = self.run_generation(&evaluate_match);
             on_generation(&report, self);
+            last_fitnesses = fitnesses;
         }
+        last_fitnesses
     }
 }

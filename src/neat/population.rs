@@ -5,8 +5,9 @@ use super::genome::types::{ConnectionGene, Genome, NodeId, ParentFitness};
 use super::species::Species;
 use rand::seq::SliceRandom;
 use rand::{Rng, RngCore};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReproductionConfig {
     pub mutation_rate_perturb_weight: f64,
     pub mutation_rate_add_connection: f64,

@@ -1,4 +1,5 @@
 use super::genome::types::{Genome, GenomeError, NodeId, NodeKind};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, VecDeque};
 
 fn relu(x: f64) -> f64 {
@@ -25,7 +26,7 @@ struct PlannedComponent {
     recurrent: bool,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct ActivationConfig {
     pub recurrent_iterations: usize,
     pub recurrent_epsilon: f64,

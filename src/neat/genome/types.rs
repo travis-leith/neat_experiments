@@ -1,25 +1,26 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub u32);
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct Innovation(pub u64);
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum NodeKind {
     Sensor,
     Hidden,
     Output,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct ConnectionKey {
     pub in_node: NodeId,
     pub out_node: NodeId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionGene {
     pub key: ConnectionKey,
     pub innovation: Innovation,
@@ -27,7 +28,7 @@ pub struct ConnectionGene {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Genome {
     pub n_inputs: usize,
     pub n_outputs: usize,
@@ -91,7 +92,7 @@ impl Genome {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct DistanceCoefficients {
     pub excess: f64,
     pub disjoint: f64,
@@ -110,7 +111,7 @@ impl Default for DistanceCoefficients {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GenomeError {
     MissingNode(NodeId),
     InvalidOutputNode(NodeId),
@@ -131,7 +132,7 @@ pub enum GenomeError {
     },
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ParentFitness {
     Left,
     Right,
