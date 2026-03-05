@@ -16,7 +16,11 @@ pub struct Species {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeciationConfig {
+    pub target_species_count: usize,
     pub compatibility_threshold: f64,
+    pub compatibility_threshold_min: f64,
+    pub compatibility_threshold_max: f64,
+    pub threshold_adjustment_rate: f64,
     pub distance_coefficients: DistanceCoefficients,
     pub stagnation_limit: usize,
 }
@@ -24,11 +28,30 @@ pub struct SpeciationConfig {
 impl Default for SpeciationConfig {
     fn default() -> Self {
         Self {
+            target_species_count: 10,
             compatibility_threshold: 3.0,
+            compatibility_threshold_min: 0.001,
+            compatibility_threshold_max: 50.0,
+            threshold_adjustment_rate: 0.1,
             distance_coefficients: DistanceCoefficients::default(),
-            stagnation_limit: 15,
+            stagnation_limit: 50,
         }
     }
+}
+
+fn adjust_compatibility_threshold(config: &SpeciationConfig, current_species_count: usize) -> f64 {
+    let delta = config.compatibility_threshold * config.threshold_adjustment_rate;
+    let adjusted = if current_species_count > config.target_species_count {
+        config.compatibility_threshold + delta
+    } else if current_species_count < config.target_species_count {
+        config.compatibility_threshold - delta
+    } else {
+        config.compatibility_threshold
+    };
+    adjusted.clamp(
+        config.compatibility_threshold_min,
+        config.compatibility_threshold_max,
+    )
 }
 
 fn find_compatible_species(
@@ -42,16 +65,15 @@ fn find_compatible_species(
     })
 }
 
-fn pick_new_representative(members: &[&Genome]) -> Genome {
-    members[0].clone()
-}
-
 pub fn speciate(
     genomes: &[Genome],
     previous_species: &[Species],
-    config: &SpeciationConfig,
+    config: &mut SpeciationConfig,
     next_species_id: &mut u64,
 ) -> Vec<Species> {
+    let previous_count = previous_species.len().max(1);
+    config.compatibility_threshold = adjust_compatibility_threshold(config, previous_count);
+
     let mut species: Vec<Species> = previous_species
         .iter()
         .map(|s| Species {

@@ -10,18 +10,14 @@ use neat_experiments::neat::phenome::Phenome;
 use neat_experiments::neat::species::SpeciationConfig;
 use std::fs;
 use std::path::Path;
-use tictactoe::cli::{CliAgent, RandomAgent};
-use tictactoe::display::board_to_string;
+use tictactoe::cli::play_against_neat;
 use tictactoe::evaluate::evaluate_tictactoe_match;
-use tictactoe::game::*;
-use tictactoe::neat_agent::NeatAgent;
 
 const CHECKPOINT_PATH: &str = "tictactoe_checkpoint.json";
 
-// -- Input/output layout --
-// 9 inputs: board cells from the agent's perspective
-// 9 outputs: one per cell, highest valid output is the chosen move
-const N_INPUTS: usize = 9;
+// 10 inputs: board cells from the agent's perspective + 1 bias input
+// 9 outputs: one per cell, highest output is the chosen move
+const N_INPUTS: usize = 10;
 const N_OUTPUTS: usize = 9;
 
 fn default_evolution_config() -> EvolutionConfig {
@@ -51,6 +47,19 @@ fn save_checkpoint(checkpoint: &EvolutionCheckpoint, path: &str) {
 fn load_checkpoint(path: &str) -> EvolutionCheckpoint {
     let json = fs::read_to_string(path).expect("failed to read checkpoint file");
     serde_json::from_str(&json).expect("failed to deserialize checkpoint")
+}
+
+fn run_and_report(evo: &mut Evolution, generations: usize) -> Vec<f64> {
+    evo.run(generations, evaluate_tictactoe_match, |report, _evo| {
+        println!(
+            "Gen {:4} | best: {:6.2} | mean: {:6.2} | species: {:3} | pop: {}",
+            report.generation,
+            report.best_fitness,
+            report.mean_fitness,
+            report.species_count,
+            report.population_size,
+        );
+    })
 }
 
 fn train(generations: usize, seed: u64) {
@@ -98,19 +107,6 @@ fn resume(generations: usize) {
     println!("Checkpoint saved to {CHECKPOINT_PATH}");
 }
 
-fn run_and_report(evo: &mut Evolution, generations: usize) -> Vec<f64> {
-    evo.run(generations, evaluate_tictactoe_match, |report, _evo| {
-        println!(
-            "Gen {:4} | best: {:6.2} | mean: {:6.2} | species: {:3} | pop: {}",
-            report.generation,
-            report.best_fitness,
-            report.mean_fitness,
-            report.species_count,
-            report.population_size,
-        );
-    })
-}
-
 fn play() {
     if !Path::new(CHECKPOINT_PATH).exists() {
         eprintln!("No checkpoint found at {CHECKPOINT_PATH}. Run 'train' first.");
@@ -120,7 +116,6 @@ fn play() {
     let checkpoint = load_checkpoint(CHECKPOINT_PATH);
     let mut evo = Evolution::from_checkpoint(checkpoint);
 
-    // Run one evaluation round to get fitnesses
     println!("Evaluating population to find the fittest agent...");
     let (_, fitnesses) = evo.run_generation(evaluate_tictactoe_match);
     let best_genome = evo.fittest_genome(&fitnesses);
@@ -134,64 +129,7 @@ fn play() {
     let phenome =
         Phenome::from_genome(&best_genome).expect("failed to build phenome from best genome");
 
-    play_against_human(phenome);
-}
-
-fn play_against_human(phenome: Phenome) {
-    let mut cli_agent = CliAgent;
-
-    loop {
-        println!("\n--- New Game ---");
-        let user_goes_first = {
-            println!("Do you want to go first? (y/n)");
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input).unwrap();
-            matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
-        };
-
-        let (user_player, ai_player) = if user_goes_first {
-            (Player::Cross, Player::Circle)
-        } else {
-            (Player::Circle, Player::Cross)
-        };
-
-        let mut ai_agent = NeatAgent::new(phenome.clone(), ai_player);
-        let initial = new_game(Player::Cross);
-
-        let (final_board, result) = match user_player {
-            Player::Cross => play_game(&mut cli_agent, &mut ai_agent, initial),
-            Player::Circle => play_game(&mut ai_agent, &mut cli_agent, initial),
-        };
-
-        println!("\nFinal board:");
-        println!("{}", board_to_string(&final_board));
-
-        match result {
-            GameOverState::Won(winner) if winner == user_player => {
-                println!("You win! 🎉");
-            }
-            GameOverState::Won(_) => {
-                println!("The AI wins! 🤖");
-            }
-            GameOverState::Tied => {
-                println!("It's a draw! 🤝");
-            }
-            GameOverState::Disqualified(p, loc) => {
-                if p == user_player {
-                    println!("You were disqualified for illegal move at {:?}!", loc);
-                } else {
-                    println!("AI was disqualified for illegal move at {:?}!", loc);
-                }
-            }
-        }
-
-        println!("\nPlay again? (y/n)");
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
-        if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
-            break;
-        }
-    }
+    play_against_neat(phenome);
 }
 
 fn print_usage() {
@@ -238,3 +176,12 @@ fn main() {
         }
     }
 }
+
+// # Train for 200 generations from scratch
+// cargo run --example tictactoe_evolve -- train 200 42
+
+// # Resume for another 100 generations
+// cargo run --example tictactoe_evolve -- resume 100
+
+// # Play against the best evolved agent
+// cargo run --example tictactoe_evolve -- play

@@ -1,9 +1,7 @@
-
-
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum Player {
     Cross,
-    Circle
+    Circle,
 }
 
 impl Player {
@@ -20,7 +18,7 @@ pub struct Cell(pub Option<Player>);
 
 #[derive(Copy, Clone, Debug)]
 pub struct GameBoard {
-    pub cells: [Cell; 9]
+    pub cells: [Cell; 9],
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -33,7 +31,7 @@ pub enum CellLocation {
     MidRgt = 5,
     BotLft = 6,
     BotMid = 7,
-    BotRgt = 8
+    BotRgt = 8,
 }
 
 impl CellLocation {
@@ -54,9 +52,15 @@ impl CellLocation {
 
     pub fn all() -> [Self; 9] {
         [
-            Self::TopLft, Self::TopMid, Self::TopRgt,
-            Self::MidLft, Self::MidMid, Self::MidRgt,
-            Self::BotLft, Self::BotMid, Self::BotRgt,
+            Self::TopLft,
+            Self::TopMid,
+            Self::TopRgt,
+            Self::MidLft,
+            Self::MidMid,
+            Self::MidRgt,
+            Self::BotLft,
+            Self::BotMid,
+            Self::BotRgt,
         ]
     }
 }
@@ -64,20 +68,20 @@ impl CellLocation {
 #[derive(Copy, Clone, Debug)]
 pub struct PlayingGameState {
     pub gameboard: GameBoard,
-    pub player_turn: Player
+    pub player_turn: Player,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum GameOverState {
     Tied,
     Won(Player),
-    Disqualified(Player, CellLocation)
+    Disqualified(Player, CellLocation),
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum GameState {
     Playing(PlayingGameState),
-    GameOver(GameBoard, GameOverState)
+    GameOver(GameBoard, GameOverState),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -87,7 +91,7 @@ pub enum MoveError {
 
 fn empty_game_board() -> GameBoard {
     GameBoard {
-        cells: [Cell(None); 9]
+        cells: [Cell(None); 9],
     }
 }
 
@@ -126,7 +130,7 @@ impl GameBoard {
         let c1 = self.cells[m1 as usize];
         let c2 = self.cells[m2 as usize];
         let c3 = self.cells[m3 as usize];
-        
+
         match (c1.0, c2.0, c3.0) {
             (Some(p1), Some(p2), Some(p3)) if p1 == p2 && p1 == p3 => Some(p1),
             _ => None,
@@ -135,21 +139,37 @@ impl GameBoard {
 
     pub fn winner(&self) -> Option<Player> {
         use CellLocation::*;
-        
+
         // Horizontal
-        if let Some(p) = self.check_line(TopLft, TopMid, TopRgt) { return Some(p); }
-        if let Some(p) = self.check_line(MidLft, MidMid, MidRgt) { return Some(p); }
-        if let Some(p) = self.check_line(BotLft, BotMid, BotRgt) { return Some(p); }
-        
+        if let Some(p) = self.check_line(TopLft, TopMid, TopRgt) {
+            return Some(p);
+        }
+        if let Some(p) = self.check_line(MidLft, MidMid, MidRgt) {
+            return Some(p);
+        }
+        if let Some(p) = self.check_line(BotLft, BotMid, BotRgt) {
+            return Some(p);
+        }
+
         // Vertical
-        if let Some(p) = self.check_line(TopLft, MidLft, BotLft) { return Some(p); }
-        if let Some(p) = self.check_line(TopMid, MidMid, BotMid) { return Some(p); }
-        if let Some(p) = self.check_line(TopRgt, MidRgt, BotRgt) { return Some(p); }
-        
+        if let Some(p) = self.check_line(TopLft, MidLft, BotLft) {
+            return Some(p);
+        }
+        if let Some(p) = self.check_line(TopMid, MidMid, BotMid) {
+            return Some(p);
+        }
+        if let Some(p) = self.check_line(TopRgt, MidRgt, BotRgt) {
+            return Some(p);
+        }
+
         // Diagonal
-        if let Some(p) = self.check_line(TopLft, MidMid, BotRgt) { return Some(p); }
-        if let Some(p) = self.check_line(BotLft, MidMid, TopRgt) { return Some(p); }
-        
+        if let Some(p) = self.check_line(TopLft, MidMid, BotRgt) {
+            return Some(p);
+        }
+        if let Some(p) = self.check_line(BotLft, MidMid, TopRgt) {
+            return Some(p);
+        }
+
         None
     }
 
@@ -157,7 +177,7 @@ impl GameBoard {
         match self.winner() {
             Some(player) => Some(GameOverState::Won(player)),
             None if self.is_full() => Some(GameOverState::Tied),
-            None => None
+            None => None,
         }
     }
 }
@@ -165,7 +185,7 @@ impl GameBoard {
 pub fn new_game(first_player: Player) -> PlayingGameState {
     PlayingGameState {
         gameboard: empty_game_board(),
-        player_turn: first_player
+        player_turn: first_player,
     }
 }
 
@@ -176,44 +196,40 @@ impl PlayingGameState {
         }
 
         let new_board = self.gameboard.with_cell(cell_loc, self.player_turn);
-        
+
         match new_board.game_over_state() {
             Some(game_over) => Ok(GameState::GameOver(new_board, game_over)),
             None => Ok(GameState::Playing(PlayingGameState {
                 gameboard: new_board,
                 player_turn: self.player_turn.opponent(),
-            }))
+            })),
         }
     }
 
     pub fn apply_move_or_disqualify(self, cell_loc: CellLocation) -> GameState {
         match self.apply_move(cell_loc) {
             Ok(state) => state,
-            Err(MoveError::CellOccupied) => {
-                GameState::GameOver(
-                    self.gameboard,
-                    GameOverState::Disqualified(self.player_turn, cell_loc)
-                )
-            }
+            Err(MoveError::CellOccupied) => GameState::GameOver(
+                self.gameboard,
+                GameOverState::Disqualified(self.player_turn, cell_loc),
+            ),
         }
     }
 }
-
 
 pub trait Agent {
     fn select_move(&mut self, state: &PlayingGameState) -> CellLocation;
 }
 
-
 pub fn play_game<A1: Agent, A2: Agent>(
     cross_agent: &mut A1,
     circle_agent: &mut A2,
-    state: PlayingGameState
+    state: PlayingGameState,
 ) -> (GameBoard, GameOverState) {
     fn play_recursive<A1: Agent, A2: Agent>(
         cross_agent: &mut A1,
         circle_agent: &mut A2,
-        state: PlayingGameState
+        state: PlayingGameState,
     ) -> (GameBoard, GameOverState) {
         let chosen_move = match state.player_turn {
             Player::Cross => cross_agent.select_move(&state),

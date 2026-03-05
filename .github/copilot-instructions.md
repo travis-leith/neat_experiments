@@ -8,3 +8,4 @@ Zero cost abstractions that make code safer and easier to read are encouraged. F
 Code ordering should be F# style: nothing can be invoked or referenced before it is defined. This means that helper functions should be defined before the main function that uses them, and that the main function should be defined at the end of the file.
 Always keep the public surface as simple and small as possible. If a function or type is only used internally, it should not be exposed publicly.
 Often, the best change to make is to remove code.
+Do not swallow errors. It is better to panic than silently do something wrong. If you need to handle an error, do it explicitly and make sure to log it or propagate it up the call stack.

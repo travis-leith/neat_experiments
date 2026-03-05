@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
+use std::str::FromStr;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub u32);
@@ -20,12 +22,71 @@ pub struct ConnectionKey {
     pub out_node: NodeId,
 }
 
+impl fmt::Display for ConnectionKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.in_node.0, self.out_node.0)
+    }
+}
+
+impl FromStr for ConnectionKey {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() != 2 {
+            return Err(format!("expected 'in:out', got '{}'", s));
+        }
+        let in_node = parts[0]
+            .parse::<u32>()
+            .map_err(|e| format!("invalid in_node: {}", e))?;
+        let out_node = parts[1]
+            .parse::<u32>()
+            .map_err(|e| format!("invalid out_node: {}", e))?;
+        Ok(ConnectionKey {
+            in_node: NodeId(in_node),
+            out_node: NodeId(out_node),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionGene {
     pub key: ConnectionKey,
     pub innovation: Innovation,
     pub weight: f64,
     pub enabled: bool,
+}
+
+fn serialize_connection_key_map<S>(
+    map: &HashMap<ConnectionKey, Innovation>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeMap;
+    let mut ser_map = serializer.serialize_map(Some(map.len()))?;
+    for (key, value) in map {
+        ser_map.serialize_entry(&key.to_string(), value)?;
+    }
+    ser_map.end()
+}
+
+fn deserialize_connection_key_map<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<ConnectionKey, Innovation>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let string_map: HashMap<String, Innovation> = HashMap::deserialize(deserializer)?;
+    string_map
+        .into_iter()
+        .map(|(k, v)| {
+            ConnectionKey::from_str(&k)
+                .map(|ck| (ck, v))
+                .map_err(serde::de::Error::custom)
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +97,10 @@ pub struct Genome {
     // Sorted by innovation for O(n) alignment.
     pub connections_by_innovation: BTreeMap<Innovation, ConnectionGene>,
     // Fast duplicate checking by structural key.
+    #[serde(
+        serialize_with = "serialize_connection_key_map",
+        deserialize_with = "deserialize_connection_key_map"
+    )]
     pub connection_to_innovation: HashMap<ConnectionKey, Innovation>,
 }
 

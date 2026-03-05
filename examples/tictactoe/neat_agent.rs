@@ -1,7 +1,9 @@
 use crate::tictactoe::game::*;
-use neat_experiments::neat::phenome::{Phenome, PhenomeError};
+use neat_experiments::neat::phenome::Phenome;
 
-fn board_to_inputs(board: &GameBoard, perspective: Player) -> Vec<f64> {
+/// Encode the board from the given player's perspective:
+/// own pieces = 1.0, opponent pieces = -1.0, empty = 0.0
+pub fn board_to_inputs(board: &GameBoard, perspective: Player) -> Vec<f64> {
     board
         .cells
         .iter()
@@ -10,24 +12,24 @@ fn board_to_inputs(board: &GameBoard, perspective: Player) -> Vec<f64> {
             Some(p) if p == perspective => 1.0,
             Some(_) => -1.0,
         })
+        .chain(std::iter::once(1.0))
         .collect()
 }
 
-fn outputs_to_move(outputs: &[f64], board: &GameBoard) -> CellLocation {
-    let mut ranked: Vec<(usize, f64)> = outputs.iter().copied().enumerate().collect();
-    ranked.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap());
-
-    ranked
+/// Pick the cell with the highest output activation.
+/// Does NOT filter for legality — the agent must learn to pick legal moves.
+///
+/// Panics if outputs is empty or contains NaN, or if the index doesn't map
+/// to a valid cell location (which would indicate a network output size mismatch).
+pub fn outputs_to_move(outputs: &[f64]) -> CellLocation {
+    let (index, _) = outputs
         .iter()
-        .filter_map(|(i, _)| CellLocation::from_usize(*i).filter(|loc| board.is_cell_empty(*loc)))
-        .next()
-        .unwrap_or_else(|| {
-            // Fallback: pick first available
-            board
-                .available_moves()
-                .next()
-                .unwrap_or(CellLocation::MidMid)
-        })
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).expect("NaN in network outputs"))
+        .expect("outputs must not be empty");
+
+    CellLocation::from_usize(index)
+        .unwrap_or_else(|| panic!("output index {index} does not map to a valid cell location"))
 }
 
 pub struct NeatAgent {
@@ -39,25 +41,15 @@ impl NeatAgent {
     pub fn new(phenome: Phenome, player: Player) -> Self {
         Self { phenome, player }
     }
-
-    pub fn from_phenome_result(
-        phenome_result: Result<Phenome, PhenomeError>,
-        player: Player,
-    ) -> Option<Self> {
-        phenome_result.ok().map(|p| Self::new(p, player))
-    }
 }
 
 impl Agent for NeatAgent {
     fn select_move(&mut self, state: &PlayingGameState) -> CellLocation {
         let inputs = board_to_inputs(&state.gameboard, self.player);
-        match self.phenome.activate(&inputs) {
-            Ok(outputs) => outputs_to_move(&outputs, &state.gameboard),
-            Err(_) => state
-                .gameboard
-                .available_moves()
-                .next()
-                .unwrap_or(CellLocation::MidMid),
-        }
+        let outputs = self
+            .phenome
+            .activate(&inputs)
+            .expect("phenome activation failed during move selection");
+        outputs_to_move(&outputs)
     }
 }

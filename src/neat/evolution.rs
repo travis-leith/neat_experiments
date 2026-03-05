@@ -277,7 +277,7 @@ impl Evolution {
         self.species = speciate(
             &self.genomes,
             &self.species,
-            &self.config.speciation,
+            &mut self.config.speciation,
             &mut self.next_species_id,
         );
 
