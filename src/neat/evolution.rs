@@ -6,7 +6,7 @@ use super::species::{
     compute_offspring_counts, speciate, update_stagnation, SpeciationConfig, Species,
 };
 use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
+use rand::{Rng, RngCore, SeedableRng};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -125,7 +125,7 @@ fn build_organisms(
     activation_config: ActivationConfig,
 ) -> Vec<Result<Organism, PhenomeError>> {
     genomes
-        .iter()
+        .par_iter()
         .enumerate()
         .map(|(i, g)| {
             Phenome::from_genome_with_config(g, activation_config).map(|phenome| Organism {
@@ -290,21 +290,58 @@ impl Evolution {
             self.config.speciation.stagnation_limit,
         );
 
+        // Fork tracker and RNG for parallel reproduction
+        let active_species: Vec<(usize, usize)> = offspring_counts
+            .iter()
+            .enumerate()
+            .filter(|(_, &count)| count > 0)
+            .map(|(i, &count)| (i, count))
+            .collect();
+
+        let n_active = active_species.len();
+
+        // Budget: each species could do at most `count` mutations, each needing
+        // up to ~4 innovations and ~1 node. Be generous.
+        let max_offspring = active_species.iter().map(|(_, c)| *c).max().unwrap_or(1);
+        let innovation_budget = (max_offspring as u64) * 8;
+        let node_budget = (max_offspring as u32) * 4;
+
+        let mut child_trackers = self.tracker.fork(n_active, innovation_budget, node_budget);
+
+        // Generate independent RNG seeds for each species
+        let child_seeds: Vec<u64> = (0..n_active).map(|_| self.rng.gen::<u64>()).collect();
+
+        let species_ref = &self.species;
+        let genomes_ref = &self.genomes;
+        let fitnesses_ref = &fitnesses;
+        let reproduction_config = &self.config.reproduction;
+
+        let results: Vec<(Vec<Genome>, InnovationTracker)> = active_species
+            .into_par_iter()
+            .zip(child_trackers.into_par_iter())
+            .zip(child_seeds.into_par_iter())
+            .map(|(((species_idx, count), mut tracker), seed)| {
+                let mut rng = StdRng::seed_from_u64(seed);
+                let offspring = reproduce_species(
+                    &species_ref[species_idx],
+                    genomes_ref,
+                    fitnesses_ref,
+                    count,
+                    &mut tracker,
+                    reproduction_config,
+                    &mut rng,
+                );
+                (offspring, tracker)
+            })
+            .collect();
+
         let mut next_genomes = Vec::with_capacity(self.config.population_size);
-        for (species, &count) in self.species.iter().zip(offspring_counts.iter()) {
-            let offspring = reproduce_species(
-                species,
-                &self.genomes,
-                &fitnesses,
-                count,
-                &mut self.tracker,
-                &self.config.reproduction,
-                &mut self.rng,
-            );
+        for (offspring, child_tracker) in results {
             next_genomes.extend(offspring);
+            self.tracker.join(child_tracker);
         }
 
-        // Safety: if rounding left us short, fill with mutated copies of the best
+        // Safety: if rounding left us short, fill with copies of the best
         while next_genomes.len() < self.config.population_size {
             let best_idx = fitnesses
                 .iter()

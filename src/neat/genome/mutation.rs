@@ -175,6 +175,30 @@ impl Genome {
     ) -> Result<Self, GenomeError> {
         mutations
             .iter()
-            .try_fold(self.clone(), |acc, m| acc.apply_mutation(tracker, m))
+            .try_fold(self.clone(), |acc, m| acc.apply_mutation_owned(tracker, m))
+    }
+
+    /// Like `apply_mutation` but consumes self to avoid an extra clone.
+    pub fn apply_mutation_owned(
+        self,
+        tracker: &mut InnovationTracker,
+        mutation: &Mutation,
+    ) -> Result<Self, GenomeError> {
+        match mutation {
+            Mutation::AddConnection {
+                in_node,
+                out_node,
+                weight,
+            } => self.with_added_connection(tracker, *in_node, *out_node, *weight),
+            Mutation::AddNode { split_innovation } => {
+                self.with_added_node(tracker, *split_innovation)
+            }
+            Mutation::PerturbWeight { innovation, delta } => {
+                self.with_perturbed_weight(*innovation, *delta)
+            }
+            Mutation::DisableConnection { innovation } => {
+                self.with_disabled_connection(*innovation)
+            }
+        }
     }
 }

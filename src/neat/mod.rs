@@ -4,3 +4,4 @@ pub mod phenome;
 pub mod population;
 pub mod round_trip;
 pub mod species;
+pub mod stats;
