@@ -22,6 +22,8 @@ pub struct SpeciesStats {
     pub best_fitness: f64,
     pub mean_fitness: f64,
     pub stagnation_counter: usize,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub aggregated_custom_stats: BTreeMap<String, f64>,
 }
 
 /// A single log entry combining standard and custom stats.
@@ -36,6 +38,7 @@ pub fn build_generation_stats(
     generation: usize,
     species: &[Species],
     fitnesses: &[f64],
+    organism_stats: &[BTreeMap<String, f64>],
 ) -> GenerationStats {
     let population_size = fitnesses.len();
 
@@ -64,12 +67,17 @@ pub fn build_generation_stats(
             } else {
                 member_fitnesses.iter().sum::<f64>() / member_fitnesses.len() as f64
             };
+
+            let aggregated_custom_stats =
+                aggregate_organism_stats(&s.member_indices, organism_stats);
+
             SpeciesStats {
                 species_id: s.id.0,
                 size: s.member_indices.len(),
                 best_fitness: species_best,
                 mean_fitness: species_mean,
                 stagnation_counter: s.stagnation_counter,
+                aggregated_custom_stats,
             }
         })
         .collect();
@@ -84,6 +92,19 @@ pub fn build_generation_stats(
         fitness_std_dev,
         species_details,
     }
+}
+
+fn aggregate_organism_stats(
+    member_indices: &[usize],
+    organism_stats: &[BTreeMap<String, f64>],
+) -> BTreeMap<String, f64> {
+    let mut aggregated = BTreeMap::new();
+    for &idx in member_indices {
+        for (key, value) in &organism_stats[idx] {
+            *aggregated.entry(key.clone()).or_insert(0.0) += value;
+        }
+    }
+    aggregated
 }
 
 fn compute_median(values: &[f64]) -> f64 {
@@ -173,37 +194,38 @@ impl Drop for JsonFileLogger {
     }
 }
 
-/// Accumulator for custom per-generation stats that the evaluation function
-/// can populate. Thread-safe for use in parallel match evaluation.
+/// Per-organism stats accumulator. Each organism gets its own instance
+/// so that stats can later be aggregated per-species.
 #[derive(Debug, Clone)]
-pub struct CustomStatsAccumulator {
-    counters: std::sync::Arc<std::sync::Mutex<BTreeMap<String, f64>>>,
+pub struct OrganismStats {
+    stats: BTreeMap<String, f64>,
 }
 
-impl CustomStatsAccumulator {
+impl OrganismStats {
     pub fn new() -> Self {
         Self {
-            counters: std::sync::Arc::new(std::sync::Mutex::new(BTreeMap::new())),
+            stats: BTreeMap::new(),
         }
     }
 
-    pub fn increment(&self, key: &str, delta: f64) {
-        let mut map = self.counters.lock().expect("stats lock poisoned");
-        *map.entry(key.to_string()).or_insert(0.0) += delta;
+    pub fn increment(&mut self, key: &str, delta: f64) {
+        *self.stats.entry(key.to_string()).or_insert(0.0) += delta;
     }
 
-    pub fn set(&self, key: &str, value: f64) {
-        let mut map = self.counters.lock().expect("stats lock poisoned");
-        map.insert(key.to_string(), value);
+    pub fn set(&mut self, key: &str, value: f64) {
+        self.stats.insert(key.to_string(), value);
     }
 
-    pub fn drain(&self) -> BTreeMap<String, f64> {
-        let mut map = self.counters.lock().expect("stats lock poisoned");
-        std::mem::take(&mut *map)
+    pub fn into_map(self) -> BTreeMap<String, f64> {
+        self.stats
+    }
+
+    pub fn as_map(&self) -> &BTreeMap<String, f64> {
+        &self.stats
     }
 }
 
-impl Default for CustomStatsAccumulator {
+impl Default for OrganismStats {
     fn default() -> Self {
         Self::new()
     }

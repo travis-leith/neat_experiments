@@ -8,12 +8,14 @@ use neat_experiments::neat::evolution::{
 };
 use neat_experiments::neat::phenome::Phenome;
 use neat_experiments::neat::species::SpeciationConfig;
+use neat_experiments::neat::stats::JsonFileLogger;
 use std::fs;
 use std::path::Path;
 use tictactoe::cli::play_against_neat;
 use tictactoe::evaluate::evaluate_tictactoe_match;
 
 const CHECKPOINT_PATH: &str = "tictactoe_checkpoint.json";
+const STATS_LOG_PATH: &str = "tictactoe_evolution_log.json";
 
 // 10 inputs: board cells from the agent's perspective + 1 bias input
 // 9 outputs: one per cell, highest output is the chosen move
@@ -37,6 +39,10 @@ fn default_match_config() -> MatchConfig {
         players_per_match: 2,
         matches_per_organism: 10,
     }
+}
+
+fn default_logger() -> Box<JsonFileLogger> {
+    Box::new(JsonFileLogger::new(STATS_LOG_PATH.to_string()).with_flush_interval(5))
 }
 
 fn save_checkpoint(checkpoint: &EvolutionCheckpoint, path: &str) {
@@ -65,7 +71,8 @@ fn run_and_report(evo: &mut Evolution, generations: usize) -> Vec<f64> {
 fn train(generations: usize, seed: u64) {
     let config = default_evolution_config();
     let match_config = default_match_config();
-    let mut evo = Evolution::new(N_INPUTS, N_OUTPUTS, config, match_config, seed);
+    let mut evo = Evolution::new(N_INPUTS, N_OUTPUTS, config, match_config, seed)
+        .with_logger(default_logger());
 
     let last_fitnesses = run_and_report(&mut evo, generations);
 
@@ -79,6 +86,7 @@ fn train(generations: usize, seed: u64) {
         best.connection_count()
     );
     println!("Checkpoint saved to {CHECKPOINT_PATH}");
+    println!("Evolution log saved to {STATS_LOG_PATH}");
 }
 
 fn resume(generations: usize) {
@@ -90,6 +98,7 @@ fn resume(generations: usize) {
     let checkpoint = load_checkpoint(CHECKPOINT_PATH);
     let starting_gen = checkpoint.generation;
     let mut evo = Evolution::from_checkpoint(checkpoint);
+    evo.set_logger(default_logger());
 
     println!("Resuming from generation {starting_gen}...");
 
@@ -105,6 +114,7 @@ fn resume(generations: usize) {
         best.connection_count()
     );
     println!("Checkpoint saved to {CHECKPOINT_PATH}");
+    println!("Evolution log saved to {STATS_LOG_PATH}");
 }
 
 fn play() {

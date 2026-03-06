@@ -5,10 +5,12 @@ use super::population::{reproduce_species, ReproductionConfig};
 use super::species::{
     compute_offspring_counts, speciate, update_stagnation, SpeciationConfig, Species,
 };
+use super::stats::{build_generation_stats, EvolutionLogger, LogEntry, NullLogger, OrganismStats};
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -20,6 +22,7 @@ pub struct Organism {
     pub id: OrganismId,
     phenome: Phenome,
     fitness: f64,
+    stats: OrganismStats,
 }
 
 impl Organism {
@@ -41,6 +44,10 @@ impl Organism {
 
     pub fn node_count(&self) -> usize {
         self.phenome.node_count()
+    }
+
+    pub fn stats(&mut self) -> &mut OrganismStats {
+        &mut self.stats
     }
 }
 
@@ -132,6 +139,7 @@ fn build_organisms(
                 id: OrganismId(i),
                 phenome,
                 fitness: 0.0,
+                stats: OrganismStats::new(),
             })
         })
         .collect()
@@ -159,6 +167,7 @@ pub struct Evolution {
     next_species_id: u64,
     generation: usize,
     rng: StdRng,
+    logger: Box<dyn EvolutionLogger>,
 }
 
 impl Evolution {
@@ -189,14 +198,24 @@ impl Evolution {
             next_species_id: 1,
             generation: 0,
             rng,
+            logger: Box::new(NullLogger),
         }
+    }
+
+    /// Attach a logger to receive per-generation stats.
+    pub fn with_logger(mut self, logger: Box<dyn EvolutionLogger>) -> Self {
+        self.logger = logger;
+        self
+    }
+
+    /// Replace the current logger.
+    pub fn set_logger(&mut self, logger: Box<dyn EvolutionLogger>) {
+        self.logger.flush();
+        self.logger = logger;
     }
 
     /// Save current state to a checkpoint that can be serialized.
     pub fn save_checkpoint(&self) -> EvolutionCheckpoint {
-        // Serialize the RNG by re-seeding from a derived value.
-        // StdRng doesn't expose internal state directly, so we snapshot
-        // by generating a seed block from the current RNG state.
         let mut rng_clone = self.rng.clone();
         let mut seed_bytes = vec![0u8; 32];
         rng_clone.fill_bytes(&mut seed_bytes);
@@ -230,6 +249,7 @@ impl Evolution {
             next_species_id: checkpoint.next_species_id,
             generation: checkpoint.generation,
             rng,
+            logger: Box::new(NullLogger),
         }
     }
 
@@ -265,12 +285,13 @@ impl Evolution {
     ///
     /// `evaluate_match` is called in parallel for each match. It receives a `&mut Match`
     /// and should run the game, calling `organism.activate()` and `organism.add_fitness()`
-    /// as needed.
+    /// as needed. It can also call `organism.stats().increment()` to record per-organism
+    /// custom stats that will be aggregated per-species in the log.
     pub fn run_generation<F>(&mut self, evaluate_match: F) -> (GenerationReport, Vec<f64>)
     where
         F: Fn(&mut Match) + Send + Sync,
     {
-        let fitnesses = self.evaluate_population(&evaluate_match);
+        let (fitnesses, organism_stats) = self.evaluate_population(&evaluate_match);
 
         let report = self.build_report(&fitnesses);
 
@@ -282,6 +303,15 @@ impl Evolution {
         );
 
         update_stagnation(&mut self.species, &fitnesses);
+
+        // Log stats
+        let generation_stats =
+            build_generation_stats(self.generation, &self.species, &fitnesses, &organism_stats);
+        let log_entry = LogEntry {
+            standard: generation_stats,
+            custom: BTreeMap::new(),
+        };
+        self.logger.log_generation(&log_entry);
 
         let offspring_counts = compute_offspring_counts(
             &self.species,
@@ -300,15 +330,12 @@ impl Evolution {
 
         let n_active = active_species.len();
 
-        // Budget: each species could do at most `count` mutations, each needing
-        // up to ~4 innovations and ~1 node. Be generous.
         let max_offspring = active_species.iter().map(|(_, c)| *c).max().unwrap_or(1);
         let innovation_budget = (max_offspring as u64) * 8;
         let node_budget = (max_offspring as u32) * 4;
 
-        let mut child_trackers = self.tracker.fork(n_active, innovation_budget, node_budget);
+        let child_trackers = self.tracker.fork(n_active, innovation_budget, node_budget);
 
-        // Generate independent RNG seeds for each species
         let child_seeds: Vec<u64> = (0..n_active).map(|_| self.rng.gen::<u64>()).collect();
 
         let species_ref = &self.species;
@@ -341,7 +368,6 @@ impl Evolution {
             self.tracker.join(child_tracker);
         }
 
-        // Safety: if rounding left us short, fill with copies of the best
         while next_genomes.len() < self.config.population_size {
             let best_idx = fitnesses
                 .iter()
@@ -359,7 +385,10 @@ impl Evolution {
         (report, fitnesses)
     }
 
-    fn evaluate_population<F>(&mut self, evaluate_match: &F) -> Vec<f64>
+    fn evaluate_population<F>(
+        &mut self,
+        evaluate_match: &F,
+    ) -> (Vec<f64>, Vec<BTreeMap<String, f64>>)
     where
         F: Fn(&mut Match) + Send + Sync,
     {
@@ -368,18 +397,13 @@ impl Evolution {
         let organism_results: Vec<Result<Organism, PhenomeError>> =
             build_organisms(&self.genomes, self.config.activation);
 
-        // Collect successfully built organisms; failed ones get zero fitness
         let organisms: Vec<Option<Organism>> =
             organism_results.into_iter().map(|r| r.ok()).collect();
 
-        // We need shared mutable access to organisms during parallel evaluation.
-        // Each match borrows disjoint organisms. We use a Vec<Mutex<Option<Organism>>>
-        // to allow parallel matches to safely take and return organisms.
         let organism_slots: Vec<Mutex<Option<Organism>>> =
             organisms.into_iter().map(|o| Mutex::new(o)).collect();
 
         matchups.par_iter().for_each(|matchup| {
-            // Take organisms out of slots
             let mut taken: Vec<(usize, Organism)> = matchup
                 .iter()
                 .filter_map(|&idx| {
@@ -389,7 +413,6 @@ impl Evolution {
                 .collect();
 
             if taken.len() < 2 {
-                // Put them back, not enough for a match
                 for (idx, org) in taken {
                     *organism_slots[idx].lock().unwrap() = Some(org);
                 }
@@ -405,17 +428,22 @@ impl Evolution {
 
             evaluate_match(&mut m);
 
-            // Put organisms back
             for (org, &idx) in m.organisms.drain(..).zip(indices.iter()) {
                 *organism_slots[idx].lock().unwrap() = Some(org);
             }
         });
 
-        // Collect fitnesses
-        organism_slots
+        let (fitnesses, organism_stats): (Vec<f64>, Vec<BTreeMap<String, f64>>) = organism_slots
             .into_iter()
-            .map(|slot| slot.into_inner().unwrap().map(|o| o.fitness).unwrap_or(0.0))
-            .collect()
+            .map(|slot| {
+                slot.into_inner()
+                    .unwrap()
+                    .map(|o| (o.fitness, o.stats.into_map()))
+                    .unwrap_or((0.0, BTreeMap::new()))
+            })
+            .unzip();
+
+        (fitnesses, organism_stats)
     }
 
     fn build_report(&self, fitnesses: &[f64]) -> GenerationReport {
@@ -452,6 +480,7 @@ impl Evolution {
             on_generation(&report, self);
             last_fitnesses = fitnesses;
         }
+        self.logger.flush();
         last_fitnesses
     }
 }

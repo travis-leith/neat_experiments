@@ -32,6 +32,45 @@ fn play_one_game(m: &mut Match, cross_idx: usize, circle_idx: usize) -> GameOver
     result
 }
 
+fn record_game_outcome(result: &GameOverState, cross_idx: usize, circle_idx: usize, m: &mut Match) {
+    match result {
+        GameOverState::Won(winner) => {
+            let (winner_idx, loser_idx) = if *winner == Player::Cross {
+                (cross_idx, circle_idx)
+            } else {
+                (circle_idx, cross_idx)
+            };
+            m.organisms[winner_idx].stats().increment("wins", 1.0);
+            m.organisms[loser_idx].stats().increment("losses", 1.0);
+        }
+        GameOverState::Tied => {
+            m.organisms[cross_idx].stats().increment("draws", 1.0);
+            m.organisms[circle_idx].stats().increment("draws", 1.0);
+        }
+        GameOverState::Disqualified(disqualified, _) => {
+            let (dq_idx, winner_idx) = if *disqualified == Player::Cross {
+                (cross_idx, circle_idx)
+            } else {
+                (circle_idx, cross_idx)
+            };
+            m.organisms[dq_idx]
+                .stats()
+                .increment("disqualifications", 1.0);
+            m.organisms[dq_idx].stats().increment("losses", 1.0);
+            m.organisms[winner_idx]
+                .stats()
+                .increment("wins_by_opponent_dq", 1.0);
+            m.organisms[winner_idx].stats().increment("wins", 1.0);
+        }
+    }
+    m.organisms[cross_idx]
+        .stats()
+        .increment("games_played", 1.0);
+    m.organisms[circle_idx]
+        .stats()
+        .increment("games_played", 1.0);
+}
+
 fn score_game(result: GameOverState, organism_idx: usize, cross_idx: usize) -> (f64, f64) {
     let organism_player = if organism_idx == cross_idx {
         Player::Cross
@@ -59,9 +98,11 @@ pub fn evaluate_tictactoe_match(m: &mut Match) {
     }
 
     let result_1 = play_one_game(m, 0, 1);
+    record_game_outcome(&result_1, 0, 1, m);
     let (score_0a, score_1a) = score_game(result_1, 0, 0);
 
     let result_2 = play_one_game(m, 1, 0);
+    record_game_outcome(&result_2, 1, 0, m);
     let (score_1b, score_0b) = score_game(result_2, 1, 1);
 
     m.organisms[0].add_fitness(score_0a + score_0b);
