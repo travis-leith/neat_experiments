@@ -5,7 +5,7 @@ use super::population::{reproduce_species, ReproductionConfig};
 use super::species::{
     compute_offspring_counts, speciate, update_stagnation, SpeciationConfig, Species,
 };
-use super::stats::{build_generation_stats, EvolutionLogger, LogEntry, NullLogger, OrganismStats};
+use super::stats::{build_generation_stats, EvolutionLogger, NullLogger, OrganismStats};
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use rayon::prelude::*;
@@ -101,6 +101,7 @@ pub struct GenerationReport {
     pub mean_fitness: f64,
     pub species_count: usize,
     pub population_size: usize,
+    pub compatibility_threshold: f64,
 }
 
 fn build_matchups(
@@ -305,13 +306,14 @@ impl Evolution {
         update_stagnation(&mut self.species, &fitnesses);
 
         // Log stats
-        let generation_stats =
-            build_generation_stats(self.generation, &self.species, &fitnesses, &organism_stats);
-        let log_entry = LogEntry {
-            standard: generation_stats,
-            custom: BTreeMap::new(),
-        };
-        self.logger.log_generation(&log_entry);
+        let generation_stats = build_generation_stats(
+            self.generation,
+            &self.species,
+            &fitnesses,
+            &organism_stats,
+            self.config.speciation.compatibility_threshold,
+        );
+        self.logger.log_generation(&generation_stats);
 
         let offspring_counts = compute_offspring_counts(
             &self.species,
@@ -460,6 +462,7 @@ impl Evolution {
             mean_fitness,
             species_count: self.species.len(),
             population_size: self.genomes.len(),
+            compatibility_threshold: self.config.speciation.compatibility_threshold,
         }
     }
 

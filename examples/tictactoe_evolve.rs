@@ -24,7 +24,8 @@ const N_OUTPUTS: usize = 9;
 
 fn default_evolution_config() -> EvolutionConfig {
     let speciation_config = SpeciationConfig {
-        compatibility_threshold: 0.1,
+        compatibility_threshold: 0.3,
+        stagnation_limit: 999999999999,
         ..Default::default()
     };
     EvolutionConfig {
@@ -58,12 +59,13 @@ fn load_checkpoint(path: &str) -> EvolutionCheckpoint {
 fn run_and_report(evo: &mut Evolution, generations: usize) -> Vec<f64> {
     evo.run(generations, evaluate_tictactoe_match, |report, _evo| {
         println!(
-            "Gen {:4} | best: {:6.2} | mean: {:6.2} | species: {:3} | pop: {}",
+            "Gen {:4} | best: {:6.2} | mean: {:6.2} | species: {:3} | pop: {} | compat thresh: {:5.3}",
             report.generation,
             report.best_fitness,
             report.mean_fitness,
             report.species_count,
             report.population_size,
+            report.compatibility_threshold,
         );
     })
 }

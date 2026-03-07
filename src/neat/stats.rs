@@ -12,6 +12,7 @@ pub struct GenerationStats {
     pub mean_fitness: f64,
     pub median_fitness: f64,
     pub fitness_std_dev: f64,
+    pub compatibility_threshold: f64,
     pub species_details: Vec<SpeciesStats>,
 }
 
@@ -22,16 +23,10 @@ pub struct SpeciesStats {
     pub best_fitness: f64,
     pub mean_fitness: f64,
     pub stagnation_counter: usize,
+    pub representative_nodes: usize,
+    pub representative_connections: usize,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub aggregated_custom_stats: BTreeMap<String, f64>,
-}
-
-/// A single log entry combining standard and custom stats.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogEntry {
-    pub standard: GenerationStats,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub custom: BTreeMap<String, f64>,
 }
 
 pub fn build_generation_stats(
@@ -39,6 +34,7 @@ pub fn build_generation_stats(
     species: &[Species],
     fitnesses: &[f64],
     organism_stats: &[BTreeMap<String, f64>],
+    compatibility_threshold: f64,
 ) -> GenerationStats {
     let population_size = fitnesses.len();
 
@@ -77,6 +73,8 @@ pub fn build_generation_stats(
                 best_fitness: species_best,
                 mean_fitness: species_mean,
                 stagnation_counter: s.stagnation_counter,
+                representative_nodes: s.representative.nodes.len(),
+                representative_connections: s.representative.connection_count(),
                 aggregated_custom_stats,
             }
         })
@@ -90,6 +88,7 @@ pub fn build_generation_stats(
         mean_fitness,
         median_fitness,
         fitness_std_dev,
+        compatibility_threshold,
         species_details,
     }
 }
@@ -131,9 +130,8 @@ fn compute_std_dev(values: &[f64], mean: f64) -> f64 {
 
 /// Trait for receiving generation stats. Implement this to customize logging behavior.
 pub trait EvolutionLogger: Send {
-    /// Called after each generation with standard stats and any custom stats
-    /// the user provided via the evaluation function.
-    fn log_generation(&mut self, entry: &LogEntry);
+    /// Called after each generation with the stats for that generation.
+    fn log_generation(&mut self, stats: &GenerationStats);
 
     /// Called when evolution is complete or the logger is being dropped.
     /// Use this to flush any buffered output.
@@ -144,12 +142,12 @@ pub trait EvolutionLogger: Send {
 pub struct NullLogger;
 
 impl EvolutionLogger for NullLogger {
-    fn log_generation(&mut self, _entry: &LogEntry) {}
+    fn log_generation(&mut self, _stats: &GenerationStats) {}
 }
 
 /// Logs each generation as a JSON line to a file.
 pub struct JsonFileLogger {
-    entries: Vec<LogEntry>,
+    entries: Vec<GenerationStats>,
     path: String,
     flush_interval: usize,
 }
@@ -176,8 +174,8 @@ impl JsonFileLogger {
 }
 
 impl EvolutionLogger for JsonFileLogger {
-    fn log_generation(&mut self, entry: &LogEntry) {
-        self.entries.push(entry.clone());
+    fn log_generation(&mut self, stats: &GenerationStats) {
+        self.entries.push(stats.clone());
         if self.entries.len() % self.flush_interval == 0 {
             self.write_to_disk();
         }
