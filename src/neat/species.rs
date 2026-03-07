@@ -1,6 +1,22 @@
 use super::genome::distance::genetic_distance;
 use super::genome::types::{DistanceCoefficients, Genome};
+use rand::seq::SliceRandom;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub enum RepresentativeStrategy {
+    /// The original founder genome is kept as representative forever.
+    Permanent,
+    /// A random member is chosen as representative each generation.
+    RandomPerGeneration,
+}
+
+impl Default for RepresentativeStrategy {
+    fn default() -> Self {
+        Self::Permanent
+    }
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct SpeciesId(pub u64);
@@ -23,6 +39,7 @@ pub struct SpeciationConfig {
     pub threshold_adjustment_rate: f64,
     pub distance_coefficients: DistanceCoefficients,
     pub stagnation_limit: usize,
+    pub representative_strategy: RepresentativeStrategy,
 }
 
 impl Default for SpeciationConfig {
@@ -35,6 +52,7 @@ impl Default for SpeciationConfig {
             threshold_adjustment_rate: 0.1,
             distance_coefficients: DistanceCoefficients::default(),
             stagnation_limit: 50,
+            representative_strategy: RepresentativeStrategy::default(),
         }
     }
 }
@@ -65,11 +83,71 @@ fn find_compatible_species(
     })
 }
 
-pub fn speciate(
+fn choose_representative<R: RngCore>(
+    current_representative: &Genome,
+    member_indices: &[usize],
+    genomes: &[Genome],
+    strategy: RepresentativeStrategy,
+    rng: &mut R,
+) -> Genome {
+    match strategy {
+        RepresentativeStrategy::Permanent => current_representative.clone(),
+        RepresentativeStrategy::RandomPerGeneration => {
+            let &idx = member_indices
+                .choose(rng)
+                .expect("choose_representative called on species with no members");
+            genomes[idx].clone()
+        }
+    }
+}
+
+fn assign_genomes_to_species(
+    genomes: &[Genome],
+    species: &mut Vec<Species>,
+    config: &SpeciationConfig,
+    next_species_id: &mut u64,
+) {
+    for (idx, genome) in genomes.iter().enumerate() {
+        match find_compatible_species(genome, species, config) {
+            Some(si) => species[si].member_indices.push(idx),
+            None => {
+                let id = SpeciesId(*next_species_id);
+                *next_species_id += 1;
+                species.push(Species {
+                    id,
+                    representative: genome.clone(),
+                    member_indices: vec![idx],
+                    stagnation_counter: 0,
+                    best_fitness: f64::NEG_INFINITY,
+                });
+            }
+        }
+    }
+}
+
+fn retain_and_update_representatives<R: RngCore>(
+    species: Vec<Species>,
+    genomes: &[Genome],
+    strategy: RepresentativeStrategy,
+    rng: &mut R,
+) -> Vec<Species> {
+    species
+        .into_iter()
+        .filter(|s| !s.member_indices.is_empty())
+        .map(|mut s| {
+            s.representative =
+                choose_representative(&s.representative, &s.member_indices, genomes, strategy, rng);
+            s
+        })
+        .collect()
+}
+
+pub fn speciate<R: RngCore>(
     genomes: &[Genome],
     previous_species: &[Species],
     config: &mut SpeciationConfig,
     next_species_id: &mut u64,
+    rng: &mut R,
 ) -> Vec<Species> {
     let previous_count = previous_species.len().max(1);
     config.compatibility_threshold = adjust_compatibility_threshold(config, previous_count);
@@ -85,33 +163,9 @@ pub fn speciate(
         })
         .collect();
 
-    for (idx, genome) in genomes.iter().enumerate() {
-        match find_compatible_species(genome, &species, config) {
-            Some(si) => species[si].member_indices.push(idx),
-            None => {
-                let id = SpeciesId(*next_species_id);
-                *next_species_id += 1;
-                species.push(Species {
-                    id,
-                    representative: genome.clone(),
-                    member_indices: vec![idx],
-                    stagnation_counter: 0,
-                    best_fitness: f64::NEG_INFINITY,
-                });
-            }
-        }
-    }
+    assign_genomes_to_species(genomes, &mut species, config, next_species_id);
 
-    // Remove empty species, update representatives
-    species
-        .into_iter()
-        .filter(|s| !s.member_indices.is_empty())
-        .map(|mut s| {
-            let rep_genome = &genomes[s.member_indices[0]];
-            s.representative = rep_genome.clone();
-            s
-        })
-        .collect()
+    retain_and_update_representatives(species, genomes, config.representative_strategy, rng)
 }
 
 fn adjusted_fitness(raw_fitness: f64, species_size: usize) -> f64 {

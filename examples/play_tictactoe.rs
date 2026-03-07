@@ -4,7 +4,7 @@
 mod tictactoe;
 
 fn main() {
-    tictactoe::cli::game_loop();
+    tictactoe::cli::game_loop_minimax();
 }
 
 // run with `cargo +nightly run --example play_tictactoe`

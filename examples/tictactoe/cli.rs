@@ -1,5 +1,6 @@
 use crate::tictactoe::display::board_to_string;
 use crate::tictactoe::game::*;
+use crate::tictactoe::minimax::MinimaxAgent;
 use crate::tictactoe::neat_agent::NeatAgent;
 use crossterm::{
     execute,
@@ -158,6 +159,10 @@ fn play_loop(mut opponent: impl Agent) {
 
 pub fn game_loop() {
     play_loop(RandomAgent);
+}
+
+pub fn game_loop_minimax() {
+    play_loop(MinimaxAgent::new());
 }
 
 pub fn play_against_neat(phenome: Phenome) {

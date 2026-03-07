@@ -11,7 +11,6 @@ use rand::{Rng, RngCore, SeedableRng};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::sync::Mutex;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct OrganismId(pub usize);
@@ -128,22 +127,17 @@ fn build_matchups(
         .collect()
 }
 
-fn build_organisms(
-    genomes: &[Genome],
-    activation_config: ActivationConfig,
-) -> Vec<Result<Organism, PhenomeError>> {
+/// Pre-built phenomes, one per genome. `None` if the genome failed to build.
+fn build_phenomes(genomes: &[Genome], activation_config: ActivationConfig) -> Vec<Option<Phenome>> {
     genomes
         .par_iter()
-        .enumerate()
-        .map(|(i, g)| {
-            Phenome::from_genome_with_config(g, activation_config).map(|phenome| Organism {
-                id: OrganismId(i),
-                phenome,
-                fitness: 0.0,
-                stats: OrganismStats::new(),
-            })
-        })
+        .map(|g| Phenome::from_genome_with_config(g, activation_config).ok())
         .collect()
+}
+
+/// Per-match result: accumulated (fitness_delta, stats) keyed by organism index.
+struct MatchResult {
+    outcomes: Vec<(usize, f64, OrganismStats)>,
 }
 
 /// Serializable snapshot of evolution state, suitable for persistence.
@@ -301,6 +295,7 @@ impl Evolution {
             &self.species,
             &mut self.config.speciation,
             &mut self.next_species_id,
+            &mut self.rng,
         );
 
         update_stagnation(&mut self.species, &fitnesses);
@@ -395,57 +390,59 @@ impl Evolution {
         F: Fn(&mut Match) + Send + Sync,
     {
         let matchups = build_matchups(self.genomes.len(), &self.match_config, &mut self.rng);
+        let phenomes = build_phenomes(&self.genomes, self.config.activation);
 
-        let organism_results: Vec<Result<Organism, PhenomeError>> =
-            build_organisms(&self.genomes, self.config.activation);
+        // Each match builds its own organisms from cloned phenomes — no Mutex needed.
+        let match_results: Vec<MatchResult> = matchups
+            .par_iter()
+            .map(|matchup| {
+                let organisms: Vec<Organism> = matchup
+                    .iter()
+                    .filter_map(|&idx| {
+                        phenomes[idx].clone().map(|p| Organism {
+                            id: OrganismId(idx),
+                            phenome: p,
+                            fitness: 0.0,
+                            stats: OrganismStats::new(),
+                        })
+                    })
+                    .collect();
 
-        let organisms: Vec<Option<Organism>> =
-            organism_results.into_iter().map(|r| r.ok()).collect();
-
-        let organism_slots: Vec<Mutex<Option<Organism>>> =
-            organisms.into_iter().map(|o| Mutex::new(o)).collect();
-
-        matchups.par_iter().for_each(|matchup| {
-            let mut taken: Vec<(usize, Organism)> = matchup
-                .iter()
-                .filter_map(|&idx| {
-                    let mut slot = organism_slots[idx].lock().unwrap();
-                    slot.take().map(|o| (idx, o))
-                })
-                .collect();
-
-            if taken.len() < 2 {
-                for (idx, org) in taken {
-                    *organism_slots[idx].lock().unwrap() = Some(org);
+                if organisms.is_empty() {
+                    return MatchResult {
+                        outcomes: Vec::new(),
+                    };
                 }
-                return;
-            }
 
-            let organisms_for_match: Vec<Organism> = taken.drain(..).map(|(_, o)| o).collect();
-            let indices: Vec<usize> = matchup.clone();
+                let mut m = Match { organisms };
+                evaluate_match(&mut m);
 
-            let mut m = Match {
-                organisms: organisms_for_match,
-            };
+                let outcomes = m
+                    .organisms
+                    .into_iter()
+                    .map(|o| (o.id.0, o.fitness, o.stats))
+                    .collect();
 
-            evaluate_match(&mut m);
-
-            for (org, &idx) in m.organisms.drain(..).zip(indices.iter()) {
-                *organism_slots[idx].lock().unwrap() = Some(org);
-            }
-        });
-
-        let (fitnesses, organism_stats): (Vec<f64>, Vec<BTreeMap<String, f64>>) = organism_slots
-            .into_iter()
-            .map(|slot| {
-                slot.into_inner()
-                    .unwrap()
-                    .map(|o| (o.fitness, o.stats.into_map()))
-                    .unwrap_or((0.0, BTreeMap::new()))
+                MatchResult { outcomes }
             })
-            .unzip();
+            .collect();
 
-        (fitnesses, organism_stats)
+        // Aggregate results sequentially — very fast, just summing floats.
+        let pop_size = self.genomes.len();
+        let mut fitnesses = vec![0.0f64; pop_size];
+        let mut stats: Vec<BTreeMap<String, f64>> =
+            (0..pop_size).map(|_| BTreeMap::new()).collect();
+
+        for result in match_results {
+            for (idx, fitness_delta, organism_stats) in result.outcomes {
+                fitnesses[idx] += fitness_delta;
+                for (k, v) in organism_stats.into_map() {
+                    *stats[idx].entry(k).or_insert(0.0) += v;
+                }
+            }
+        }
+
+        (fitnesses, stats)
     }
 
     fn build_report(&self, fitnesses: &[f64]) -> GenerationReport {

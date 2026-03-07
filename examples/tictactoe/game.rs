@@ -1,4 +1,4 @@
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash)]
 pub enum Player {
     Cross,
     Circle,
@@ -13,7 +13,7 @@ impl Player {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Cell(pub Option<Player>);
 
 #[derive(Copy, Clone, Debug)]

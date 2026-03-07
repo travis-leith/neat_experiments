@@ -11,11 +11,11 @@ use neat_experiments::neat::species::SpeciationConfig;
 use neat_experiments::neat::stats::JsonFileLogger;
 use std::fs;
 use std::path::Path;
-use tictactoe::cli::play_against_neat;
-use tictactoe::evaluate::evaluate_tictactoe_match;
+use tictactoe::cli::{game_loop_minimax, play_against_neat};
+use tictactoe::evaluate_minimax::evaluate_minimax_fitness;
 
-const CHECKPOINT_PATH: &str = "tictactoe_checkpoint.json";
-const STATS_LOG_PATH: &str = "tictactoe_evolution_log.json";
+const CHECKPOINT_PATH: &str = "tictactoe_minimax_checkpoint.json";
+const STATS_LOG_PATH: &str = "tictactoe_minimax_evolution_log.json";
 
 // 10 inputs: board cells from the agent's perspective + 1 bias input
 // 9 outputs: one per cell, highest output is the chosen move
@@ -25,7 +25,7 @@ const N_OUTPUTS: usize = 9;
 fn default_evolution_config() -> EvolutionConfig {
     let speciation_config = SpeciationConfig {
         compatibility_threshold: 0.3,
-        stagnation_limit: 999999999999,
+        stagnation_limit: 100,
         ..Default::default()
     };
     EvolutionConfig {
@@ -36,9 +36,12 @@ fn default_evolution_config() -> EvolutionConfig {
 }
 
 fn default_match_config() -> MatchConfig {
+    // Each "match" is just 1 organism evaluated independently against minimax.
+    // We still set players_per_match to 1 so the framework hands us one organism at a time,
+    // but evaluate_minimax_fitness handles any number.
     MatchConfig {
-        players_per_match: 2,
-        matches_per_organism: 10,
+        players_per_match: 1,
+        matches_per_organism: 1,
     }
 }
 
@@ -57,9 +60,9 @@ fn load_checkpoint(path: &str) -> EvolutionCheckpoint {
 }
 
 fn run_and_report(evo: &mut Evolution, generations: usize) -> Vec<f64> {
-    evo.run(generations, evaluate_tictactoe_match, |report, _evo| {
+    evo.run(generations, evaluate_minimax_fitness, |report, _evo| {
         println!(
-            "Gen {:4} | best: {:6.2} | mean: {:6.2} | species: {:3} | pop: {} | compat thresh: {:3.5}",
+            "Gen {:4} | best: {:6.4} | mean: {:6.4} | species: {:3} | pop: {} | compat thresh: {:3.5}",
             report.generation,
             report.best_fitness,
             report.mean_fitness,
@@ -86,6 +89,13 @@ fn train(generations: usize, seed: u64) {
         "\nTraining complete. {} generations. Best genome has {} connections.",
         evo.generation(),
         best.connection_count()
+    );
+    println!(
+        "Best fitness: {:.4}",
+        last_fitnesses
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max)
     );
     println!("Checkpoint saved to {CHECKPOINT_PATH}");
     println!("Evolution log saved to {STATS_LOG_PATH}");
@@ -129,59 +139,16 @@ fn play() {
     let mut evo = Evolution::from_checkpoint(checkpoint);
 
     println!("Evaluating population to find the fittest agent...");
-    let (_, fitnesses) = evo.run_generation(evaluate_tictactoe_match);
+    let (_, fitnesses) = evo.run_generation(evaluate_minimax_fitness);
 
-    let species_id_filter: Option<u64> =
-        std::env::args().nth(2).and_then(|s| s.parse::<u64>().ok());
-
-    let (best_genome, species_id) = match species_id_filter {
-        Some(target_id) => {
-            let target_species = evo
-                .species()
-                .iter()
-                .find(|s| s.id.0 == target_id)
-                .unwrap_or_else(|| {
-                    let available: Vec<u64> = evo.species().iter().map(|s| s.id.0).collect();
-                    panic!(
-                        "Species {} not found. Available species: {:?}",
-                        target_id, available
-                    );
-                });
-
-            let best_idx = target_species
-                .member_indices
-                .iter()
-                .copied()
-                .max_by(|&a, &b| fitnesses[a].partial_cmp(&fitnesses[b]).unwrap())
-                .expect("species has no members");
-
-            (evo.genomes()[best_idx].clone(), target_id)
-        }
-        None => {
-            let best_genome = evo.fittest_genome(&fitnesses);
-            let best_idx = fitnesses
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-
-            let species_id = evo
-                .species()
-                .iter()
-                .find(|s| s.member_indices.contains(&best_idx))
-                .map(|s| s.id.0)
-                .unwrap_or(0);
-
-            (best_genome, species_id)
-        }
-    };
+    let best_genome = evo.fittest_genome(&fitnesses);
+    let best_fitness = fitnesses.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
     println!(
-        "Best agent (species {}): {} nodes, {} connections",
-        species_id,
+        "Best agent: {} nodes, {} connections, fitness: {:.4}",
         best_genome.nodes.len(),
-        best_genome.connection_count()
+        best_genome.connection_count(),
+        best_fitness,
     );
 
     let phenome =
@@ -190,13 +157,19 @@ fn play() {
     play_against_neat(phenome);
 }
 
+fn play_minimax() {
+    println!("Playing against the perfect minimax agent...");
+    game_loop_minimax();
+}
+
 fn print_usage() {
-    eprintln!("Usage: tictactoe_evolve <command> [args]");
+    eprintln!("Usage: tictactoe_evolve_minimax <command> [args]");
     eprintln!();
     eprintln!("Commands:");
-    eprintln!("  train <generations> [seed]  - Train from scratch");
+    eprintln!("  train <generations> [seed]  - Train from scratch using minimax fitness");
     eprintln!("  resume <generations>        - Resume training from checkpoint");
-    eprintln!("  play [species_id]           - Play against the best evolved agent (optionally from a specific species)");
+    eprintln!("  play                        - Play against the best evolved agent");
+    eprintln!("  play-minimax                - Play against the perfect minimax agent");
 }
 
 fn main() {
@@ -229,17 +202,23 @@ fn main() {
         "play" => {
             play();
         }
+        "play-minimax" => {
+            play_minimax();
+        }
         _ => {
             print_usage();
         }
     }
 }
 
-// # Train for 200 generations from scratch
-// cargo run --example tictactoe_evolve -- train 200 42
+// # Train for 200 generations using minimax fitness
+// cargo +nightly run --example tictactoe_evolve_minimax -- train 200 42
 
 // # Resume for another 100 generations
-// cargo run --example tictactoe_evolve -- resume 100
+// cargo +nightly run --example tictactoe_evolve_minimax -- resume 100
 
 // # Play against the best evolved agent
-// cargo run --example tictactoe_evolve -- play
+// cargo +nightly run --example tictactoe_evolve_minimax -- play
+
+// # Play against the perfect minimax agent directly
+// cargo +nightly run --example tictactoe_evolve_minimax -- play-minimax

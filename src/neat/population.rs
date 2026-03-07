@@ -136,10 +136,17 @@ fn produce_offspring_by_mutation<R: RngCore>(
     rng: &mut R,
 ) -> Genome {
     let mutations = random_mutations(parent, config, rng);
-    match parent.apply_mutations(tracker, &mutations) {
-        Ok(child) => child,
-        Err(_) => parent.clone(),
+    if mutations.is_empty() {
+        return parent.clone();
     }
+    // Single clone + in-place mutations instead of N clones
+    let mut child = parent.clone();
+    for m in &mutations {
+        if child.apply_mutation_in_place(tracker, m).is_err() {
+            return parent.clone();
+        }
+    }
+    child
 }
 
 fn produce_offspring_by_crossover<R: RngCore>(

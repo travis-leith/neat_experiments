@@ -500,103 +500,60 @@ impl Phenome {
         self.log_line("reset_non_sensor_state".to_string());
     }
 
-    fn set_inputs(&mut self, inputs: &[f64]) -> Result<(), PhenomeError> {
-        if inputs.len() != self.input_indices.len() {
-            return Err(PhenomeError::InputArityMismatch {
-                expected: self.input_indices.len(),
-                actual: inputs.len(),
-            });
-        }
-
-        let input_indices = self.input_indices.clone();
-        for (x, idx) in inputs.iter().zip(input_indices.into_iter()) {
-            self.state[idx] = *x;
-            let line = format!("input {} ({:?}) = {:.12}", idx, self.node_ids[idx], *x);
-            self.log_line(line);
-        }
-
-        Ok(())
-    }
-
-    fn zero_component_scratch(&mut self, comp: &PlannedComponent) {
-        for &n in &comp.nodes {
+    fn zero_component_scratch_by_index(&mut self, cid: usize) {
+        for ni in 0..self.components[cid].nodes.len() {
+            let n = self.components[cid].nodes[ni];
             self.scratch[n] = 0.0;
         }
     }
 
-    fn accumulate_external_weighted_sum(&mut self, comp: &PlannedComponent) {
-        for e in &comp.external_edges {
-            let src = self.state[e.src];
-            let contribution = src * e.weight;
+    fn accumulate_external_weighted_sum_by_index(&mut self, cid: usize) {
+        for ei in 0..self.components[cid].external_edges.len() {
+            let e = self.components[cid].external_edges[ei];
+            let src_val = self.state[e.src];
+            let contribution = src_val * e.weight;
             self.scratch[e.dst] += contribution;
-            self.log_line(format!(
-                "external: {}({:.12}) * w({:.12}) -> {} += {:.12} => {:.12}",
-                self.node_label(e.src),
-                src,
-                e.weight,
-                self.node_label(e.dst),
-                contribution,
-                self.scratch[e.dst]
-            ));
         }
     }
 
-    fn accumulate_internal_weighted_sum(&mut self, comp: &PlannedComponent) {
-        for e in &comp.internal_edges {
-            let src = self.state[e.src];
-            let contribution = src * e.weight;
+    fn accumulate_internal_weighted_sum_by_index(&mut self, cid: usize) {
+        for ei in 0..self.components[cid].internal_edges.len() {
+            let e = self.components[cid].internal_edges[ei];
+            let src_val = self.state[e.src];
+            let contribution = src_val * e.weight;
             self.scratch[e.dst] += contribution;
-            self.log_line(format!(
-                "internal: {}({:.12}) * w({:.12}) -> {} += {:.12} => {:.12}",
-                self.node_label(e.src),
-                src,
-                e.weight,
-                self.node_label(e.dst),
-                contribution,
-                self.scratch[e.dst]
-            ));
         }
     }
 
-    fn commit_component_values(&mut self, comp: &PlannedComponent) {
-        for &n in &comp.nodes {
+    fn commit_component_values_by_index(&mut self, cid: usize) {
+        for ni in 0..self.components[cid].nodes.len() {
+            let n = self.components[cid].nodes[ni];
             if self.node_kinds[n] != NodeKind::Sensor {
-                let before = self.state[n];
                 let sum = self.scratch[n];
-                let after = relu(sum);
-                self.state[n] = after;
-                self.log_line(format!(
-                    "commit: {} relu({:.12}) => {:.12} (prev {:.12})",
-                    self.node_label(n),
-                    sum,
-                    after,
-                    before
-                ));
+                self.state[n] = relu(sum);
             }
         }
     }
 
-    fn activate_acyclic_component(&mut self, comp: &PlannedComponent) {
-        self.log_line(format!("activate_acyclic_component nodes={:?}", comp.nodes));
-        self.zero_component_scratch(comp);
-        self.accumulate_external_weighted_sum(comp);
-        self.accumulate_internal_weighted_sum(comp);
-        self.commit_component_values(comp);
+    fn activate_acyclic_component_by_index(&mut self, cid: usize) {
+        self.zero_component_scratch_by_index(cid);
+        self.accumulate_external_weighted_sum_by_index(cid);
+        self.accumulate_internal_weighted_sum_by_index(cid);
+        self.commit_component_values_by_index(cid);
     }
 
-    fn activate_recurrent_component(&mut self, comp: &PlannedComponent) {
-        self.log_line(format!(
-            "activate_recurrent_component nodes={:?} max_iter={} eps={:.12}",
-            comp.nodes, self.config.recurrent_iterations, self.config.recurrent_epsilon
-        ));
+    fn activate_recurrent_component_by_index(&mut self, cid: usize) {
+        let max_iter = self.config.recurrent_iterations;
+        let epsilon = self.config.recurrent_epsilon;
 
-        for iter in 0..self.config.recurrent_iterations {
-            self.zero_component_scratch(comp);
-            self.accumulate_external_weighted_sum(comp);
-            self.accumulate_internal_weighted_sum(comp);
+        for _iter in 0..max_iter {
+            self.zero_component_scratch_by_index(cid);
+            self.accumulate_external_weighted_sum_by_index(cid);
+            self.accumulate_internal_weighted_sum_by_index(cid);
 
             let mut max_delta = 0.0f64;
-            for &n in &comp.nodes {
+            for ni in 0..self.components[cid].nodes.len() {
+                let n = self.components[cid].nodes[ni];
                 if self.node_kinds[n] == NodeKind::Sensor {
                     continue;
                 }
@@ -607,25 +564,28 @@ impl Phenome {
                     max_delta = delta;
                 }
                 self.state[n] = next;
-                self.log_line(format!(
-                    "recurrent iter {} node {} relu({:.12}) => {:.12}; delta={:.12}",
-                    iter,
-                    self.node_label(n),
-                    self.scratch[n],
-                    next,
-                    delta
-                ));
             }
 
-            self.log_line(format!(
-                "recurrent iter {} max_delta={:.12}",
-                iter, max_delta
-            ));
-            if max_delta <= self.config.recurrent_epsilon {
-                self.log_line(format!("recurrent converged at iter {}", iter));
+            if max_delta <= epsilon {
                 break;
             }
         }
+    }
+
+    fn set_inputs(&mut self, inputs: &[f64]) -> Result<(), PhenomeError> {
+        if inputs.len() != self.input_indices.len() {
+            return Err(PhenomeError::InputArityMismatch {
+                expected: self.input_indices.len(),
+                actual: inputs.len(),
+            });
+        }
+
+        for i in 0..inputs.len() {
+            let idx = self.input_indices[i];
+            self.state[idx] = inputs[i];
+        }
+
+        Ok(())
     }
 
     pub fn activate(&mut self, inputs: &[f64]) -> Result<Vec<f64>, PhenomeError> {
@@ -637,19 +597,21 @@ impl Phenome {
 
         for i in 0..self.active_component_indices.len() {
             let cid = self.active_component_indices[i];
-            let comp = self.components[cid].clone();
+            // SAFETY: we only read from self.components[cid] and write to self.state/scratch
+            // which don't overlap with components. Use index-based access to avoid clone.
+            let recurrent = self.components[cid].recurrent;
 
-            self.log_line(format!("component {} recurrent={}", cid, comp.recurrent));
-            if comp.recurrent {
-                self.activate_recurrent_component(&comp);
+            self.log_line(format!("component {} recurrent={}", cid, recurrent));
+            if recurrent {
+                self.activate_recurrent_component_by_index(cid);
             } else {
-                self.activate_acyclic_component(&comp);
+                self.activate_acyclic_component_by_index(cid);
             }
         }
 
-        let output_indices = self.output_indices.clone();
-        let mut out = Vec::with_capacity(output_indices.len());
-        for idx in output_indices {
+        let mut out = Vec::with_capacity(self.output_indices.len());
+        for i in 0..self.output_indices.len() {
+            let idx = self.output_indices[i];
             self.log_line(format!(
                 "output {} ({:?}) = {:.12}",
                 idx, self.node_ids[idx], self.state[idx]
