@@ -1,4 +1,6 @@
 use crate::tictactoe::game::*;
+use rand::seq::SliceRandom;
+use rand::Rng;
 use std::collections::HashMap;
 
 /// The outcome of perfect play from a given position.
@@ -178,33 +180,48 @@ impl Agent for MinimaxAgent {
 ///
 /// Walks through an entire game from the given state, using the provided
 /// function to get the agent's chosen move at each step where it's the
-/// agent's turn. Returns (correct_moves, total_moves).
-pub fn score_against_perfect_play<F>(
+/// agent's turn. The minimax opponent chooses randomly among optimal moves.
+/// Returns (correct_moves, total_moves).
+pub fn score_against_perfect_play<F, R>(
     initial_state: PlayingGameState,
     agent_player: Player,
     mut get_agent_move: F,
+    rng: &mut R,
 ) -> (u32, u32)
 where
     F: FnMut(&PlayingGameState) -> CellLocation,
+    R: Rng,
 {
-    fn walk<F>(
+    fn walk<F, R>(
         state: PlayingGameState,
         agent_player: Player,
         get_agent_move: &mut F,
         cache: &mut Cache,
+        rng: &mut R,
         correct: u32,
         total: u32,
     ) -> (u32, u32)
     where
         F: FnMut(&PlayingGameState) -> CellLocation,
+        R: Rng,
     {
         if state.player_turn != agent_player {
-            // Opponent plays optimally
+            // Opponent plays a random optimal move
             let (_, optimal) = optimal_moves_with_cache(&state, cache);
-            let opponent_move = optimal[0];
+            let opponent_move = *optimal
+                .choose(rng)
+                .expect("optimal_moves returned empty list");
             match state.apply_move_or_disqualify(opponent_move) {
                 GameState::Playing(next) => {
-                    become walk(next, agent_player, get_agent_move, cache, correct, total)
+                    become walk(
+                        next,
+                        agent_player,
+                        get_agent_move,
+                        cache,
+                        rng,
+                        correct,
+                        total,
+                    )
                 }
                 GameState::GameOver(_, _) => (correct, total),
             }
@@ -221,6 +238,7 @@ where
                         agent_player,
                         get_agent_move,
                         cache,
+                        rng,
                         new_correct,
                         new_total,
                     )
@@ -236,6 +254,7 @@ where
         agent_player,
         &mut get_agent_move,
         &mut cache,
+        rng,
         0,
         0,
     )

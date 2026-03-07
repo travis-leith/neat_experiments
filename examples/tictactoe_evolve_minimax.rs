@@ -25,7 +25,7 @@ const N_OUTPUTS: usize = 9;
 fn default_evolution_config() -> EvolutionConfig {
     let speciation_config = SpeciationConfig {
         compatibility_threshold: 0.3,
-        stagnation_limit: 100,
+        stagnation_limit: 30,
         ..Default::default()
     };
     EvolutionConfig {
@@ -41,7 +41,7 @@ fn default_match_config() -> MatchConfig {
     // but evaluate_minimax_fitness handles any number.
     MatchConfig {
         players_per_match: 1,
-        matches_per_organism: 1,
+        matches_per_organism: 10,
     }
 }
 
