@@ -7,7 +7,7 @@ use crossterm::{
     terminal::{Clear, ClearType},
 };
 use neat_experiments::neat::phenome::Phenome;
-use rand::seq::SliceRandom;
+use rand::seq::{IndexedRandom, SliceRandom};
 use std::io::{self, stdout, BufRead};
 
 struct RandomAgent;
@@ -15,7 +15,7 @@ struct RandomAgent;
 impl Agent for RandomAgent {
     fn select_move(&mut self, state: &PlayingGameState) -> CellLocation {
         let moves: Vec<_> = state.gameboard.available_moves().collect();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         *moves
             .choose(&mut rng)
             .expect("select_move called with no available moves")

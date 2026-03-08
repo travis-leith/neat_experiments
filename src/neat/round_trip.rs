@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn evolution_checkpoint_round_trip() {
         let mut tracker = InnovationTracker::new();
-        let mut r = rand::thread_rng();
+        let mut r = rand::rng();
         let genomes = Genome::random_fully_connected_population(5, 3, 2, &mut tracker, &mut r);
 
         let species = vec![Species {

@@ -4,7 +4,13 @@ mod tests {
     use super::super::distance::*;
     use super::super::innovation::*;
     use super::super::mutation::*;
+    use super::super::pruning::*;
     use super::super::types::*;
+
+    fn get_innovation(g: &Genome, in_node: NodeId, out_node: NodeId) -> Innovation {
+        let key = ConnectionKey { in_node, out_node };
+        *g.connection_to_innovation.get(&key).unwrap()
+    }
 
     fn base_tracker() -> InnovationTracker {
         InnovationTracker::new() // with 2 inputs + 1 output
@@ -436,5 +442,95 @@ mod tests {
 
         assert_eq!(g2.connection_count(), g.connection_count() + 2);
         assert!(!g2.connection(split).unwrap().enabled);
+    }
+
+    #[test]
+    fn prune_removes_disabled_connections() {
+        let mut t = InnovationTracker::new();
+        let g = Genome::minimal_fully_connected(2, 1, &mut t, |_, _| 1.0);
+
+        let innov = get_innovation(&g, NodeId(0), NodeId(2));
+        let g = g
+            .apply_mutations(&mut t, &[Mutation::DisableConnection { innovation: innov }])
+            .unwrap();
+
+        assert_eq!(g.connections_by_innovation.len(), 2);
+
+        let pruned = prune(&g);
+
+        assert_eq!(pruned.connections_by_innovation.len(), 1);
+        assert!(pruned.connections_by_innovation.values().all(|c| c.enabled));
+    }
+
+    #[test]
+    fn prune_removes_orphaned_hidden_nodes() {
+        let mut t = InnovationTracker::new();
+        let g = Genome::minimal_fully_connected(1, 1, &mut t, |_, _| 1.0);
+
+        let split = get_innovation(&g, NodeId(0), NodeId(1));
+        let g = g.with_added_node(&mut t, split).unwrap();
+
+        // After split: NodeId(0)->NodeId(2)->NodeId(1), original disabled
+        // Now disable both new connections to orphan the hidden node
+        let innov_left = get_innovation(&g, NodeId(0), NodeId(2));
+        let innov_right = get_innovation(&g, NodeId(2), NodeId(1));
+        let g = g
+            .apply_mutations(
+                &mut t,
+                &[
+                    Mutation::DisableConnection {
+                        innovation: innov_left,
+                    },
+                    Mutation::DisableConnection {
+                        innovation: innov_right,
+                    },
+                ],
+            )
+            .unwrap();
+
+        assert!(g.nodes.contains_key(&NodeId(2)));
+
+        let pruned = prune(&g);
+
+        assert!(!pruned.nodes.contains_key(&NodeId(2)));
+        // IO nodes always retained
+        assert!(pruned.nodes.contains_key(&NodeId(0)));
+        assert!(pruned.nodes.contains_key(&NodeId(1)));
+    }
+
+    #[test]
+    fn prune_preserves_io_nodes_even_with_no_connections() {
+        let mut t = InnovationTracker::new();
+        let g = Genome::minimal_fully_connected(2, 2, &mut t, |_, _| 1.0);
+
+        // Disable all connections
+        let innovations: Vec<_> = g.innovations().collect();
+        let mutations: Vec<_> = innovations
+            .into_iter()
+            .map(|i| Mutation::DisableConnection { innovation: i })
+            .collect();
+        let g = g.apply_mutations(&mut t, &mutations).unwrap();
+
+        let pruned = prune(&g);
+
+        assert_eq!(pruned.connections_by_innovation.len(), 0);
+        assert_eq!(pruned.nodes.len(), 4); // 2 inputs + 2 outputs
+    }
+
+    #[test]
+    fn prune_is_idempotent() {
+        let mut t = InnovationTracker::new();
+        let g = Genome::minimal_fully_connected(2, 1, &mut t, |_, _| 1.0);
+        let split = get_innovation(&g, NodeId(0), NodeId(2));
+        let g = g.with_added_node(&mut t, split).unwrap();
+
+        let pruned_once = prune(&g);
+        let pruned_twice = prune(&pruned_once);
+
+        assert_eq!(pruned_once.nodes.len(), pruned_twice.nodes.len());
+        assert_eq!(
+            pruned_once.connections_by_innovation.len(),
+            pruned_twice.connections_by_innovation.len()
+        );
     }
 }

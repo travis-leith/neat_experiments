@@ -1,7 +1,7 @@
 use super::genome::distance::genetic_distance;
 use super::genome::types::{DistanceCoefficients, Genome};
-use rand::seq::SliceRandom;
-use rand::RngCore;
+use rand::seq::{IndexedRandom, SliceRandom};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -40,6 +40,7 @@ pub struct SpeciationConfig {
     pub distance_coefficients: DistanceCoefficients,
     pub stagnation_limit: usize,
     pub representative_strategy: RepresentativeStrategy,
+    pub pruning_interval: Option<usize>,
 }
 
 impl Default for SpeciationConfig {
@@ -53,7 +54,15 @@ impl Default for SpeciationConfig {
             distance_coefficients: DistanceCoefficients::default(),
             stagnation_limit: 50,
             representative_strategy: RepresentativeStrategy::default(),
+            pruning_interval: None,
         }
+    }
+}
+
+pub fn should_prune(generation: usize, config: &SpeciationConfig) -> bool {
+    match config.pruning_interval {
+        Some(n) if n > 0 => generation > 0 && generation % n == 0,
+        _ => false,
     }
 }
 
@@ -83,7 +92,7 @@ fn find_compatible_species(
     })
 }
 
-fn choose_representative<R: RngCore>(
+fn choose_representative<R: Rng>(
     current_representative: &Genome,
     member_indices: &[usize],
     genomes: &[Genome],
@@ -125,7 +134,7 @@ fn assign_genomes_to_species(
     }
 }
 
-fn retain_and_update_representatives<R: RngCore>(
+fn retain_and_update_representatives<R: Rng>(
     species: Vec<Species>,
     genomes: &[Genome],
     strategy: RepresentativeStrategy,
@@ -142,7 +151,7 @@ fn retain_and_update_representatives<R: RngCore>(
         .collect()
 }
 
-pub fn speciate<R: RngCore>(
+pub fn speciate<R: Rng>(
     genomes: &[Genome],
     previous_species: &[Species],
     config: &mut SpeciationConfig,

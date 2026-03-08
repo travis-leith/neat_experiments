@@ -1,6 +1,6 @@
 use super::innovation::InnovationTracker;
 use super::types::{ConnectionGene, ConnectionKey, Genome, Innovation, NodeId, NodeKind};
-use rand::{Rng, RngCore};
+use rand::{Rng, RngExt};
 use std::collections::{BTreeMap, HashMap};
 
 fn build_nodes(input_nodes: &[NodeId], output_nodes: &[NodeId]) -> BTreeMap<NodeId, NodeKind> {
@@ -89,7 +89,7 @@ impl Genome {
         })
     }
 
-    pub fn random_fully_connected_population<R: RngCore>(
+    pub fn random_fully_connected_population<R: Rng>(
         n: usize,
         n_inputs: usize,
         n_outputs: usize,
@@ -103,7 +103,7 @@ impl Genome {
         (0..n)
             .map(|_| {
                 build_genome_from_topology(n_inputs, n_outputs, &nodes, &topology, |_i, _o| {
-                    rng.gen_range(-1.0..1.0)
+                    rng.random_range(-1.0..1.0)
                 })
             })
             .collect::<Vec<_>>()

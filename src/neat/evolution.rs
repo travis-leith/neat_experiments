@@ -1,3 +1,6 @@
+use crate::neat::genome::pruning::prune_population;
+use crate::neat::species::should_prune;
+
 use super::genome::innovation::InnovationTracker;
 use super::genome::types::Genome;
 use super::phenome::{ActivationConfig, Phenome, PhenomeError};
@@ -7,7 +10,7 @@ use super::species::{
 };
 use super::stats::{build_generation_stats, EvolutionLogger, NullLogger, OrganismStats};
 use rand::rngs::StdRng;
-use rand::{Rng, RngCore, SeedableRng};
+use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -106,7 +109,7 @@ pub struct GenerationReport {
 fn build_matchups(
     population_size: usize,
     match_config: &MatchConfig,
-    rng: &mut impl RngCore,
+    rng: &mut impl Rng,
 ) -> Vec<Vec<usize>> {
     use rand::seq::SliceRandom;
 
@@ -210,10 +213,9 @@ impl Evolution {
     }
 
     /// Save current state to a checkpoint that can be serialized.
-    pub fn save_checkpoint(&self) -> EvolutionCheckpoint {
-        let mut rng_clone = self.rng.clone();
+    pub fn save_checkpoint(&mut self) -> EvolutionCheckpoint {
         let mut seed_bytes = vec![0u8; 32];
-        rng_clone.fill_bytes(&mut seed_bytes);
+        self.rng.fill_bytes(&mut seed_bytes);
 
         EvolutionCheckpoint {
             config: self.config.clone(),
@@ -284,7 +286,7 @@ impl Evolution {
     /// custom stats that will be aggregated per-species in the log.
     pub fn run_generation<F>(&mut self, evaluate_match: F) -> (GenerationReport, Vec<f64>)
     where
-        F: Fn(&mut Match) + Send + Sync,
+        F: Fn(&mut Match, usize) + Send + Sync,
     {
         let (fitnesses, organism_stats) = self.evaluate_population(&evaluate_match);
 
@@ -333,7 +335,7 @@ impl Evolution {
 
         let child_trackers = self.tracker.fork(n_active, innovation_budget, node_budget);
 
-        let child_seeds: Vec<u64> = (0..n_active).map(|_| self.rng.gen::<u64>()).collect();
+        let child_seeds: Vec<u64> = (0..n_active).map(|_| self.rng.next_u64()).collect();
 
         let species_ref = &self.species;
         let genomes_ref = &self.genomes;
@@ -387,7 +389,7 @@ impl Evolution {
         evaluate_match: &F,
     ) -> (Vec<f64>, Vec<BTreeMap<String, f64>>)
     where
-        F: Fn(&mut Match) + Send + Sync,
+        F: Fn(&mut Match, usize) + Send + Sync,
     {
         let matchups = build_matchups(self.genomes.len(), &self.match_config, &mut self.rng);
         let phenomes = build_phenomes(&self.genomes, self.config.activation);
@@ -415,7 +417,7 @@ impl Evolution {
                 }
 
                 let mut m = Match { organisms };
-                evaluate_match(&mut m);
+                evaluate_match(&mut m, self.generation);
 
                 let outcomes = m
                     .organisms
@@ -471,12 +473,17 @@ impl Evolution {
         mut on_generation: C,
     ) -> Vec<f64>
     where
-        F: Fn(&mut Match) + Send + Sync,
+        F: Fn(&mut Match, usize) + Send + Sync,
         C: FnMut(&GenerationReport, &Evolution),
     {
         let mut last_fitnesses = vec![0.0; self.genomes.len()];
         for _ in 0..generations {
             let (report, fitnesses) = self.run_generation(&evaluate_match);
+
+            if should_prune(self.generation, &self.config.speciation) {
+                self.genomes = prune_population(&self.genomes);
+            }
+
             on_generation(&report, self);
             last_fitnesses = fitnesses;
         }

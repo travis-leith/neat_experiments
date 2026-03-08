@@ -26,6 +26,7 @@ fn default_evolution_config() -> EvolutionConfig {
     let speciation_config = SpeciationConfig {
         compatibility_threshold: 0.3,
         stagnation_limit: 30,
+        pruning_interval: Some(50),
         ..Default::default()
     };
     EvolutionConfig {
@@ -212,13 +213,13 @@ fn main() {
 }
 
 // # Train for 200 generations using minimax fitness
-// cargo +nightly run --example tictactoe_evolve_minimax -- train 200 42
+// cargo +nightly run --release --example tictactoe_evolve_minimax -- train 200 42
 
 // # Resume for another 100 generations
-// cargo +nightly run --example tictactoe_evolve_minimax -- resume 100
+// cargo +nightly run --release --example tictactoe_evolve_minimax -- resume 100
 
 // # Play against the best evolved agent
-// cargo +nightly run --example tictactoe_evolve_minimax -- play
+// cargo +nightly run --release --example tictactoe_evolve_minimax -- play
 
 // # Play against the perfect minimax agent directly
-// cargo +nightly run --example tictactoe_evolve_minimax -- play-minimax
+// cargo +nightly run --release --example tictactoe_evolve_minimax -- play-minimax

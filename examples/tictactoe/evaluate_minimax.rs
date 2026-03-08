@@ -10,14 +10,20 @@ use rand::SeedableRng;
 ///
 /// Fitness = fraction of moves that matched perfect play across both games.
 ///
-/// The framework calls this multiple times per organism according to
-/// `matches_per_organism`, each time with a fresh Match. We derive a unique
-/// RNG seed from the organism's id and its current accumulated fitness
-/// (which changes across matches), giving each match a distinct opponent line.
-fn evaluate_organism(m: &mut Match, organism_idx: usize) -> f64 {
+/// The RNG seed is derived from the organism's id, the current generation,
+/// and the match index (approximated via accumulated fitness progression).
+/// Using the generation ensures organisms face different opponent lines each
+/// generation, preventing memorization of specific opponent sequences.
+fn evaluate_organism(m: &mut Match, organism_idx: usize, generation: usize) -> f64 {
     let org_id = m.organisms[organism_idx].id.0 as u64;
-    let salt = m.organisms[organism_idx].fitness().to_bits();
-    let mut rng = StdRng::seed_from_u64(org_id.wrapping_mul(2654435761).wrapping_add(salt));
+    let generation = generation as u64;
+    let match_index = m.organisms[organism_idx].fitness().to_bits();
+    let seed = org_id
+        .wrapping_mul(2654435761)
+        .wrapping_add(generation.wrapping_mul(1099511628211))
+        .wrapping_add(match_index);
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut rng = rand::rng();
 
     let mut total_correct: u32 = 0;
     let mut total_moves: u32 = 0;
@@ -61,9 +67,9 @@ fn evaluate_organism(m: &mut Match, organism_idx: usize) -> f64 {
 /// Each organism in the match is independently scored against perfect play.
 /// Called once per match; the framework handles running multiple matches per
 /// organism via `MatchConfig::matches_per_organism`.
-pub fn evaluate_minimax_fitness(m: &mut Match) {
+pub fn evaluate_minimax_fitness(m: &mut Match, generation: usize) {
     for i in 0..m.organisms.len() {
-        let fitness = evaluate_organism(m, i);
+        let fitness = evaluate_organism(m, i, generation);
         m.organisms[i].add_fitness(fitness);
     }
 }

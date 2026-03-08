@@ -3,8 +3,8 @@ use super::genome::innovation::InnovationTracker;
 use super::genome::mutation::Mutation;
 use super::genome::types::{ConnectionGene, Genome, NodeId, ParentFitness};
 use super::species::Species;
-use rand::seq::SliceRandom;
-use rand::{Rng, RngCore};
+use rand::prelude::IndexedRandom;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,11 +34,11 @@ impl Default for ReproductionConfig {
     }
 }
 
-fn select_parent<R: RngCore>(member_indices: &[usize], fitnesses: &[f64], rng: &mut R) -> usize {
+fn select_parent<R: Rng>(member_indices: &[usize], fitnesses: &[f64], rng: &mut R) -> usize {
     // Tournament selection with size 3
     let tournament_size = member_indices.len().min(3);
     let candidates: Vec<usize> = member_indices
-        .choose_multiple(rng, tournament_size)
+        .sample(rng, tournament_size)
         .copied()
         .collect();
 
@@ -48,18 +48,18 @@ fn select_parent<R: RngCore>(member_indices: &[usize], fitnesses: &[f64], rng: &
         .unwrap()
 }
 
-fn random_mutations<R: RngCore>(
+fn random_mutations<R: Rng>(
     genome: &Genome,
     config: &ReproductionConfig,
     rng: &mut R,
 ) -> Vec<Mutation> {
     let mut mutations = Vec::new();
 
-    if rng.gen::<f64>() < config.mutation_rate_perturb_weight {
+    if rng.random::<f64>() < config.mutation_rate_perturb_weight {
         let innovations: Vec<_> = genome.innovations().collect();
         if let Some(&innov) = innovations.choose(rng) {
             let delta =
-                rng.gen_range(-config.weight_perturb_magnitude..config.weight_perturb_magnitude);
+                rng.random_range(-config.weight_perturb_magnitude..config.weight_perturb_magnitude);
             mutations.push(Mutation::PerturbWeight {
                 innovation: innov,
                 delta,
@@ -67,12 +67,12 @@ fn random_mutations<R: RngCore>(
         }
     }
 
-    if rng.gen::<f64>() < config.mutation_rate_add_connection {
+    if rng.random::<f64>() < config.mutation_rate_add_connection {
         let nodes: Vec<NodeId> = genome.nodes.keys().copied().collect();
         if nodes.len() >= 2 {
             let &in_node = nodes.choose(rng).unwrap();
             let &out_node = nodes.choose(rng).unwrap();
-            let weight = rng.gen_range(-1.0..1.0);
+            let weight = rng.random_range(-1.0..1.0);
             mutations.push(Mutation::AddConnection {
                 in_node,
                 out_node,
@@ -81,7 +81,7 @@ fn random_mutations<R: RngCore>(
         }
     }
 
-    if rng.gen::<f64>() < config.mutation_rate_add_node {
+    if rng.random::<f64>() < config.mutation_rate_add_node {
         let enabled_innovations: Vec<_> = genome
             .connections_by_innovation
             .values()
@@ -95,7 +95,7 @@ fn random_mutations<R: RngCore>(
         }
     }
 
-    if rng.gen::<f64>() < config.mutation_rate_disable_connection {
+    if rng.random::<f64>() < config.mutation_rate_disable_connection {
         let enabled_innovations: Vec<_> = genome
             .connections_by_innovation
             .values()
@@ -110,26 +110,26 @@ fn random_mutations<R: RngCore>(
     mutations
 }
 
-struct RandomCrossoverPolicy<'a, R: RngCore> {
+struct RandomCrossoverPolicy<'a, R: Rng> {
     rng: &'a mut R,
     disabled_reenable_probability: f64,
 }
 
-impl<'a, R: RngCore> CrossoverPolicy for RandomCrossoverPolicy<'a, R> {
+impl<'a, R: Rng> CrossoverPolicy for RandomCrossoverPolicy<'a, R> {
     fn choose_left_matching(&mut self, _left: &ConnectionGene, _right: &ConnectionGene) -> bool {
-        self.rng.gen::<bool>()
+        self.rng.random::<bool>()
     }
 
     fn choose_left_when_equal_for_unmatched(&mut self) -> bool {
-        self.rng.gen::<bool>()
+        self.rng.random::<bool>()
     }
 
     fn enable_if_either_parent_disabled(&mut self) -> bool {
-        self.rng.gen::<f64>() < self.disabled_reenable_probability
+        self.rng.random::<f64>() < self.disabled_reenable_probability
     }
 }
 
-fn produce_offspring_by_mutation<R: RngCore>(
+fn produce_offspring_by_mutation<R: Rng>(
     parent: &Genome,
     tracker: &mut InnovationTracker,
     config: &ReproductionConfig,
@@ -149,7 +149,7 @@ fn produce_offspring_by_mutation<R: RngCore>(
     child
 }
 
-fn produce_offspring_by_crossover<R: RngCore>(
+fn produce_offspring_by_crossover<R: Rng>(
     parent_a: &Genome,
     parent_b: &Genome,
     fitness_a: f64,
@@ -185,7 +185,7 @@ fn sorted_members_by_fitness(species: &Species, fitnesses: &[f64]) -> Vec<usize>
     members
 }
 
-pub fn reproduce_species<R: RngCore>(
+pub fn reproduce_species<R: Rng>(
     species: &Species,
     all_genomes: &[Genome],
     all_fitnesses: &[f64],
@@ -208,7 +208,7 @@ pub fn reproduce_species<R: RngCore>(
     }
 
     while offspring.len() < offspring_count {
-        let child = if rng.gen::<f64>() < config.crossover_rate && sorted.len() >= 2 {
+        let child = if rng.random::<f64>() < config.crossover_rate && sorted.len() >= 2 {
             let parent_a_idx = select_parent(&sorted, all_fitnesses, rng);
             let parent_b_idx = select_parent(&sorted, all_fitnesses, rng);
             produce_offspring_by_crossover(
