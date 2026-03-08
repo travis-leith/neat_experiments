@@ -4,7 +4,7 @@
 mod tictactoe;
 
 use neat_experiments::neat::evolution::{
-    Evolution, EvolutionCheckpoint, EvolutionConfig, MatchConfig,
+    Evolution, EvolutionCheckpoint, EvolutionConfig, Match, MatchConfig,
 };
 use neat_experiments::neat::phenome::Phenome;
 use neat_experiments::neat::species::SpeciationConfig;
@@ -12,7 +12,8 @@ use neat_experiments::neat::stats::JsonFileLogger;
 use std::fs;
 use std::path::Path;
 use tictactoe::cli::{game_loop_minimax, play_against_neat};
-use tictactoe::evaluate_minimax::evaluate_minimax_fitness;
+use tictactoe::evaluate_minimax::{evaluate_minimax_fitness, make_evaluate_minimax};
+use tictactoe::size_penalty;
 
 const CHECKPOINT_PATH: &str = "tictactoe_minimax_checkpoint.json";
 const STATS_LOG_PATH: &str = "tictactoe_minimax_evolution_log.json";
@@ -60,8 +61,11 @@ fn load_checkpoint(path: &str) -> EvolutionCheckpoint {
     serde_json::from_str(&json).expect("failed to deserialize checkpoint")
 }
 
-fn run_and_report(evo: &mut Evolution, generations: usize) -> Vec<f64> {
-    evo.run(generations, evaluate_minimax_fitness, |report, _evo| {
+fn run_and_report<F>(evo: &mut Evolution, generations: usize, evaluate: &F) -> Vec<f64>
+where
+    F: Fn(&mut Match, usize) + Send + Sync,
+{
+    evo.run(generations, evaluate, |report, _evo| {
         println!(
             "Gen {:4} | best: {:6.4} | mean: {:6.4} | species: {:3} | pop: {} | compat thresh: {:3.5}",
             report.generation,
@@ -80,7 +84,13 @@ fn train(generations: usize, seed: u64) {
     let mut evo = Evolution::new(N_INPUTS, N_OUTPUTS, config, match_config, seed)
         .with_logger(default_logger());
 
-    let last_fitnesses = run_and_report(&mut evo, generations);
+    // Choose a penalty strategy here:
+    // let evaluate = make_evaluate_minimax(size_penalty::no_penalty);
+    // let evaluate = make_evaluate_minimax(size_penalty::threshold(25, 0.02));
+    // let evaluate = make_evaluate_minimax(size_penalty::exponential_with_threshold(20, 0.05));
+    let evaluate = make_evaluate_minimax(size_penalty::seasonal_with_threshold(20, 100, 0.0, 0.03));
+
+    let last_fitnesses = run_and_report(&mut evo, generations, &evaluate);
 
     let checkpoint = evo.save_checkpoint();
     save_checkpoint(&checkpoint, CHECKPOINT_PATH);
@@ -115,7 +125,9 @@ fn resume(generations: usize) {
 
     println!("Resuming from generation {starting_gen}...");
 
-    let last_fitnesses = run_and_report(&mut evo, generations);
+    let evaluate = make_evaluate_minimax(size_penalty::seasonal_with_threshold(20, 100, 0.0, 0.03));
+
+    let last_fitnesses = run_and_report(&mut evo, generations, &evaluate);
 
     let checkpoint = evo.save_checkpoint();
     save_checkpoint(&checkpoint, CHECKPOINT_PATH);
@@ -156,6 +168,37 @@ fn play() {
         Phenome::from_genome(&best_genome).expect("failed to build phenome from best genome");
 
     play_against_neat(phenome);
+}
+
+fn write_best_mermaid() {
+    if !Path::new(CHECKPOINT_PATH).exists() {
+        eprintln!("No checkpoint found at {CHECKPOINT_PATH}. Run 'train' first.");
+        return;
+    }
+
+    let checkpoint = load_checkpoint(CHECKPOINT_PATH);
+    let mut evo = Evolution::from_checkpoint(checkpoint);
+
+    println!("Evaluating population to find the fittest agent...");
+    let (_, fitnesses) = evo.run_generation(evaluate_minimax_fitness);
+
+    let best_genome = evo.fittest_genome(&fitnesses);
+    let best_fitness = fitnesses.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+    println!(
+        "Best agent: {} nodes, {} connections, fitness: {:.4}",
+        best_genome.nodes.len(),
+        best_genome.connection_count(),
+        best_fitness,
+    );
+
+    let phenome =
+        Phenome::from_genome(&best_genome).expect("failed to build phenome from best genome");
+
+    let mermaid = phenome.to_mermaid(false, true);
+    //write the mermaid to a file for easy viewing
+    fs::write("best_agent_mermaid.txt", mermaid).expect("failed to write mermaid file");
+    println!("Mermaid diagram of best agent written to best_agent_mermaid.txt");
 }
 
 fn play_minimax() {
@@ -202,6 +245,9 @@ fn main() {
         }
         "play" => {
             play();
+        }
+        "print-mermaid" => {
+            write_best_mermaid();
         }
         "play-minimax" => {
             play_minimax();

@@ -1,6 +1,7 @@
 use crate::tictactoe::game::*;
 use crate::tictactoe::minimax::score_against_perfect_play;
 use crate::tictactoe::neat_agent::{board_to_inputs, outputs_to_move};
+use crate::tictactoe::size_penalty;
 use neat_experiments::neat::evolution::Match;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -10,20 +11,10 @@ use rand::SeedableRng;
 ///
 /// Fitness = fraction of moves that matched perfect play across both games.
 ///
-/// The RNG seed is derived from the organism's id, the current generation,
-/// and the match index (approximated via accumulated fitness progression).
-/// Using the generation ensures organisms face different opponent lines each
-/// generation, preventing memorization of specific opponent sequences.
-fn evaluate_organism(m: &mut Match, organism_idx: usize, generation: usize) -> f64 {
-    let org_id = m.organisms[organism_idx].id.0 as u64;
-    let generation = generation as u64;
-    let match_index = m.organisms[organism_idx].fitness().to_bits();
-    let seed = org_id
-        .wrapping_mul(2654435761)
-        .wrapping_add(generation.wrapping_mul(1099511628211))
-        .wrapping_add(match_index);
-    let mut rng = StdRng::seed_from_u64(seed);
-    let mut rng = rand::rng();
+/// Each organism gets its own RNG derived from the match seed and its index
+/// within the match, ensuring deterministic but high-quality randomisation.
+fn evaluate_organism(m: &mut Match, organism_idx: usize) -> (f64, usize) {
+    let mut rng = StdRng::seed_from_u64(m.seed.wrapping_add(organism_idx as u64));
 
     let mut total_correct: u32 = 0;
     let mut total_moves: u32 = 0;
@@ -55,11 +46,14 @@ fn evaluate_organism(m: &mut Match, organism_idx: usize, generation: usize) -> f
         .stats()
         .increment("total_moves", total_moves as f64);
 
-    if total_moves == 0 {
+    let raw_fitness = if total_moves == 0 {
         0.0
     } else {
         (total_correct as f64) / (total_moves as f64)
-    }
+    };
+
+    let node_count = m.organisms[organism_idx].node_count();
+    (raw_fitness, node_count)
 }
 
 /// Evaluation function compatible with the Evolution framework.
@@ -67,9 +61,31 @@ fn evaluate_organism(m: &mut Match, organism_idx: usize, generation: usize) -> f
 /// Each organism in the match is independently scored against perfect play.
 /// Called once per match; the framework handles running multiple matches per
 /// organism via `MatchConfig::matches_per_organism`.
+pub fn make_evaluate_minimax<F>(penalty_fn: F) -> impl Fn(&mut Match, usize) + Send + Sync
+where
+    F: Fn(usize, usize) -> f64 + Send + Sync,
+{
+    move |m: &mut Match, generation: usize| {
+        for i in 0..m.organisms.len() {
+            let (raw_fitness, node_count) = evaluate_organism(m, i);
+            let penalized = size_penalty::apply(raw_fitness, node_count, generation, &penalty_fn);
+
+            m.organisms[i].stats().increment("raw_fitness", raw_fitness);
+            m.organisms[i]
+                .stats()
+                .increment("size_penalty_factor", penalty_fn(node_count, generation));
+
+            m.organisms[i].add_fitness(penalized);
+        }
+    }
+}
+
+/// Evaluation function with no size penalty — backwards compatible.
 pub fn evaluate_minimax_fitness(m: &mut Match, generation: usize) {
+    let no_pen = size_penalty::no_penalty;
     for i in 0..m.organisms.len() {
-        let fitness = evaluate_organism(m, i, generation);
+        let (raw_fitness, node_count) = evaluate_organism(m, i);
+        let fitness = size_penalty::apply(raw_fitness, node_count, generation, &no_pen);
         m.organisms[i].add_fitness(fitness);
     }
 }

@@ -360,6 +360,49 @@ pub struct Phenome {
     audit_log: Vec<String>,
 }
 
+fn build_collapsed_component_label(
+    cid: usize,
+    comp: &PlannedComponent,
+    node_ids: &[NodeId],
+    node_kinds: &[NodeKind],
+) -> String {
+    let component_kind = if comp.recurrent {
+        "recurrent"
+    } else {
+        "acyclic"
+    };
+    let node_count = comp.nodes.len();
+    let node_word = if node_count == 1 { "node" } else { "nodes" };
+
+    let sensors: Vec<String> = comp
+        .nodes
+        .iter()
+        .filter(|&&n| node_kinds[n] == NodeKind::Sensor)
+        .map(|&n| format!("{:?}", node_ids[n]))
+        .collect();
+
+    let outputs: Vec<String> = comp
+        .nodes
+        .iter()
+        .filter(|&&n| node_kinds[n] == NodeKind::Output)
+        .map(|&n| format!("{:?}", node_ids[n]))
+        .collect();
+
+    let mut label = format!(
+        "Component {} ({}, {} {})",
+        cid, component_kind, node_count, node_word
+    );
+
+    if !sensors.is_empty() {
+        label.push_str(&format!("<br/>sensors: {}", sensors.join(", ")));
+    }
+    if !outputs.is_empty() {
+        label.push_str(&format!("<br/>outputs: {}", outputs.join(", ")));
+    }
+
+    label
+}
+
 impl Phenome {
     pub fn from_genome(genome: &Genome) -> Result<Self, PhenomeError> {
         Self::from_genome_with_config(genome, ActivationConfig::default())
@@ -444,50 +487,86 @@ impl Phenome {
         }
     }
 
-    pub fn to_mermaid(&self, include_disabled: bool) -> String {
+    pub fn to_mermaid(&self, include_disabled: bool, collapse_components: bool) -> String {
         let mut lines = vec![
             "graph TD".to_string(),
             "classDef sensor fill:#d7f0ff,stroke:#1e88e5,stroke-width:1px;".to_string(),
             "classDef output fill:#e8f5e9,stroke:#43a047,stroke-width:1px;".to_string(),
             "classDef internal fill:#fff8e1,stroke:#f9a825,stroke-width:1px;".to_string(),
+            "classDef component fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;".to_string(),
         ];
 
-        for (cid, comp) in self.components.iter().enumerate() {
-            let component_kind = if comp.recurrent {
-                "recurrent"
-            } else {
-                "acyclic"
-            };
-            lines.push(format!(
-                "subgraph C{}[\"Component {} ({})\"]",
-                cid, cid, component_kind
-            ));
-            for &n in &comp.nodes {
+        if collapse_components {
+            for (cid, comp) in self.components.iter().enumerate() {
+                let label =
+                    build_collapsed_component_label(cid, comp, &self.node_ids, &self.node_kinds);
+                lines.push(format!("C{}[\"{}\"]", cid, label));
+                lines.push(format!("class C{} component;", cid));
+            }
+
+            let component_of_node = build_component_index(
+                &self
+                    .components
+                    .iter()
+                    .map(|c| c.nodes.clone())
+                    .collect::<Vec<_>>(),
+                self.node_ids.len(),
+            );
+
+            let mut seen_edges = BTreeSet::<(usize, usize)>::new();
+            for e in &self.all_edges {
+                if !include_disabled && !e.enabled {
+                    continue;
+                }
+                let c_src = component_of_node[e.src];
+                let c_dst = component_of_node[e.dst];
+                if c_src == c_dst {
+                    continue;
+                }
+                if seen_edges.insert((c_src, c_dst)) {
+                    let link = if e.enabled { "-->" } else { "-.->" };
+                    lines.push(format!("C{} {} C{}", c_src, link, c_dst));
+                }
+            }
+        } else {
+            // ...existing code... (the non-collapsed branch stays unchanged)
+            for (cid, comp) in self.components.iter().enumerate() {
+                let component_kind = if comp.recurrent {
+                    "recurrent"
+                } else {
+                    "acyclic"
+                };
                 lines.push(format!(
-                    "  N{}[\"{} / {:?}\"]",
-                    n,
-                    self.node_label(n),
-                    self.node_kinds[n]
+                    "subgraph C{}[\"Component {} ({})\"]",
+                    cid, cid, component_kind
                 ));
+                for &n in &comp.nodes {
+                    lines.push(format!(
+                        "  N{}[\"{} / {:?}\"]",
+                        n,
+                        self.node_label(n),
+                        self.node_kinds[n]
+                    ));
+                }
+                lines.push("end".to_string());
             }
-            lines.push("end".to_string());
-        }
 
-        for e in &self.all_edges {
-            if !include_disabled && !e.enabled {
-                continue;
+            for e in &self.all_edges {
+                if !include_disabled && !e.enabled {
+                    continue;
+                }
+                let w = format!("{:.6}", e.weight);
+                let link = if e.enabled {
+                    format!("-->|{}|", w)
+                } else {
+                    format!("-.->")
+                };
+                lines.push(format!("N{} {} N{}", e.src, link, e.dst));
             }
-            let w = format!("{:.6}", e.weight);
-            let link = if e.enabled {
-                format!("-->|{}|", w)
-            } else {
-                format!("-.->")
-            };
-            lines.push(format!("N{} {} N{}", e.src, link, e.dst));
-        }
 
-        for (i, kind) in self.node_kinds.iter().copied().enumerate() {
-            lines.push(format!("class N{} {};", i, Self::node_kind_class(kind)));
+            for (i, kind) in self.node_kinds.iter().copied().enumerate() {
+                lines.push(format!("class N{} {};", i, Self::node_kind_class(kind)));
+            }
         }
 
         lines.join("\n")
@@ -838,7 +917,7 @@ mod tests {
         let genome = dead_ends_1();
         let mut p = Phenome::from_genome(&genome).unwrap();
         p.set_logging_enabled(true);
-        let mermaid = p.to_mermaid(false);
+        let mermaid = p.to_mermaid(false, false);
         println!("{}", mermaid);
         let output = p.activate(&vec![0.5, -0.2]).unwrap();
         println!("{:?}", output);

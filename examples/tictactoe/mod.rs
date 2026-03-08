@@ -5,4 +5,5 @@ pub mod evaluate_minimax;
 pub mod game;
 pub mod minimax;
 pub mod neat_agent;
+pub mod size_penalty;
 pub mod tests;

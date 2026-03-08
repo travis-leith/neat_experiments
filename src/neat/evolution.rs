@@ -76,8 +76,8 @@ impl Default for EvolutionConfig {
 /// The user's evaluate function receives a `&mut Match` and runs the game.
 pub struct Match {
     pub organisms: Vec<Organism>,
+    pub seed: u64,
 }
-
 /// Describes which organisms should be grouped together for competition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchConfig {
@@ -394,10 +394,16 @@ impl Evolution {
         let matchups = build_matchups(self.genomes.len(), &self.match_config, &mut self.rng);
         let phenomes = build_phenomes(&self.genomes, self.config.activation);
 
+        // Pre-generate one seed per match from the main RNG
+        let match_seeds: Vec<u64> = (0..matchups.len()).map(|_| self.rng.next_u64()).collect();
+
+        let generation = self.generation;
+
         // Each match builds its own organisms from cloned phenomes — no Mutex needed.
         let match_results: Vec<MatchResult> = matchups
             .par_iter()
-            .map(|matchup| {
+            .zip(match_seeds.par_iter())
+            .map(|(matchup, &seed)| {
                 let organisms: Vec<Organism> = matchup
                     .iter()
                     .filter_map(|&idx| {
@@ -416,8 +422,8 @@ impl Evolution {
                     };
                 }
 
-                let mut m = Match { organisms };
-                evaluate_match(&mut m, self.generation);
+                let mut m = Match { organisms, seed };
+                evaluate_match(&mut m, generation);
 
                 let outcomes = m
                     .organisms

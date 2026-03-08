@@ -3,6 +3,8 @@ mod tests {
     use crate::tictactoe::game::*;
     use crate::tictactoe::minimax::*;
     use crate::tictactoe::neat_agent::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     // ---------------------------------------------------------------
     // Cache and minimax correctness tests
@@ -234,11 +236,17 @@ mod tests {
     fn score_perfect_agent_gets_all_correct() {
         // An agent that always picks the first optimal move should get 100%
         let initial = new_game(Player::Cross);
+        let mut rng = StdRng::seed_from_u64(42);
 
-        let (correct, total) = score_against_perfect_play(initial, Player::Cross, |state| {
-            let (_, optimal) = optimal_moves(state);
-            optimal[0]
-        });
+        let (correct, total) = score_against_perfect_play(
+            initial,
+            Player::Cross,
+            |state| {
+                let (_, optimal) = optimal_moves(state);
+                optimal[0]
+            },
+            &mut rng,
+        );
 
         assert!(total > 0, "there should be at least one move");
         assert_eq!(
@@ -251,11 +259,17 @@ mod tests {
     #[test]
     fn score_perfect_agent_as_circle_gets_all_correct() {
         let initial = new_game(Player::Cross);
+        let mut rng = StdRng::seed_from_u64(42);
 
-        let (correct, total) = score_against_perfect_play(initial, Player::Circle, |state| {
-            let (_, optimal) = optimal_moves(state);
-            optimal[0]
-        });
+        let (correct, total) = score_against_perfect_play(
+            initial,
+            Player::Circle,
+            |state| {
+                let (_, optimal) = optimal_moves(state);
+                optimal[0]
+            },
+            &mut rng,
+        );
 
         assert!(total > 0, "circle should have at least one move");
         assert_eq!(
@@ -270,15 +284,21 @@ mod tests {
         // An agent that always picks the first available move (index 0) will
         // likely not play perfectly.
         let initial = new_game(Player::Cross);
+        let mut rng = StdRng::seed_from_u64(42);
 
-        let (correct, total) = score_against_perfect_play(initial, Player::Cross, |state| {
-            // Just pick the first available move
-            state
-                .gameboard
-                .available_moves()
-                .next()
-                .expect("should have available moves")
-        });
+        let (correct, total) = score_against_perfect_play(
+            initial,
+            Player::Cross,
+            |state| {
+                // Just pick the first available move
+                state
+                    .gameboard
+                    .available_moves()
+                    .next()
+                    .expect("should have available moves")
+            },
+            &mut rng,
+        );
 
         assert!(total > 0, "there should be at least one move");
         // We can't guarantee it gets ALL wrong, but for a typical game it should
@@ -292,16 +312,27 @@ mod tests {
         // When playing as Cross (first player), the agent should have more
         // moves than when playing as Circle (second player), for the same game.
         let initial = new_game(Player::Cross);
+        let mut rng = StdRng::seed_from_u64(42);
 
-        let (_, total_as_cross) = score_against_perfect_play(initial, Player::Cross, |state| {
-            let (_, optimal) = optimal_moves(state);
-            optimal[0]
-        });
+        let (_, total_as_cross) = score_against_perfect_play(
+            initial,
+            Player::Cross,
+            |state| {
+                let (_, optimal) = optimal_moves(state);
+                optimal[0]
+            },
+            &mut rng,
+        );
 
-        let (_, total_as_circle) = score_against_perfect_play(initial, Player::Circle, |state| {
-            let (_, optimal) = optimal_moves(state);
-            optimal[0]
-        });
+        let (_, total_as_circle) = score_against_perfect_play(
+            initial,
+            Player::Circle,
+            |state| {
+                let (_, optimal) = optimal_moves(state);
+                optimal[0]
+            },
+            &mut rng,
+        );
 
         // Cross goes first, so should have >= Circle's move count
         assert!(
@@ -527,11 +558,17 @@ mod tests {
 
         for &agent_player in &[Player::Cross, Player::Circle] {
             let initial = new_game(Player::Cross);
+            let mut rng = StdRng::seed_from_u64(42);
 
-            let (correct, moves) = score_against_perfect_play(initial, agent_player, |state| {
-                let (_, optimal) = optimal_moves(state);
-                optimal[0]
-            });
+            let (correct, moves) = score_against_perfect_play(
+                initial,
+                agent_player,
+                |state| {
+                    let (_, optimal) = optimal_moves(state);
+                    optimal[0]
+                },
+                &mut rng,
+            );
 
             total_correct += correct;
             total_moves += moves;
@@ -558,9 +595,14 @@ mod tests {
 
         for &agent_player in &[Player::Cross, Player::Circle] {
             let initial = new_game(Player::Cross);
+            let mut rng = StdRng::seed_from_u64(42);
 
-            let (correct, moves) =
-                score_against_perfect_play(initial, agent_player, |_state| CellLocation::TopLft);
+            let (correct, moves) = score_against_perfect_play(
+                initial,
+                agent_player,
+                |_state| CellLocation::TopLft,
+                &mut rng,
+            );
 
             total_correct += correct;
             total_moves += moves;
@@ -613,12 +655,18 @@ mod tests {
 
         for &agent_player in &[Player::Cross, Player::Circle] {
             let initial = new_game(Player::Cross);
+            let mut rng = StdRng::seed_from_u64(42);
 
-            let (correct, moves) = score_against_perfect_play(initial, agent_player, |state| {
-                // Simulate an untrained network: all outputs are 0.0
-                let outputs = vec![0.0; 9];
-                outputs_to_move(&outputs)
-            });
+            let (correct, moves) = score_against_perfect_play(
+                initial,
+                agent_player,
+                |state| {
+                    // Simulate an untrained network: all outputs are 0.0
+                    let outputs = vec![0.0; 9];
+                    outputs_to_move(&outputs)
+                },
+                &mut rng,
+            );
 
             total_correct += correct;
             total_moves += moves;
