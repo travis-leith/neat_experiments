@@ -28,6 +28,14 @@ pub struct Organism {
 }
 
 impl Organism {
+    pub fn node_count(&self) -> usize {
+        self.phenome.node_count()
+    }
+
+    pub fn connection_count(&self) -> usize {
+        self.phenome.connection_count()
+    }
+
     pub fn activate(&mut self, inputs: &[f64]) -> Result<Vec<f64>, PhenomeError> {
         self.phenome.activate(inputs)
     }
@@ -42,10 +50,6 @@ impl Organism {
 
     pub fn fitness(&self) -> f64 {
         self.fitness
-    }
-
-    pub fn node_count(&self) -> usize {
-        self.phenome.node_count()
     }
 
     pub fn stats(&mut self) -> &mut OrganismStats {

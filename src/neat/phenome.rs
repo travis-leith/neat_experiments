@@ -404,6 +404,14 @@ fn build_collapsed_component_label(
 }
 
 impl Phenome {
+    pub fn node_count(&self) -> usize {
+        self.node_ids.len()
+    }
+
+    pub fn connection_count(&self) -> usize {
+        self.all_edges.len()
+    }
+
     pub fn from_genome(genome: &Genome) -> Result<Self, PhenomeError> {
         Self::from_genome_with_config(genome, ActivationConfig::default())
     }
@@ -700,10 +708,6 @@ impl Phenome {
 
         self.log_line("activate: end".to_string());
         Ok(out)
-    }
-
-    pub fn node_count(&self) -> usize {
-        self.node_ids.len()
     }
 }
 

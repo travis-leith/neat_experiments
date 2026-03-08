@@ -88,7 +88,9 @@ fn train(generations: usize, seed: u64) {
     // let evaluate = make_evaluate_minimax(size_penalty::no_penalty);
     // let evaluate = make_evaluate_minimax(size_penalty::threshold(25, 0.02));
     // let evaluate = make_evaluate_minimax(size_penalty::exponential_with_threshold(20, 0.05));
-    let evaluate = make_evaluate_minimax(size_penalty::seasonal_with_threshold(20, 100, 0.0, 0.03));
+    let evaluate = make_evaluate_minimax(size_penalty::seasonal_connections_with_threshold(
+        20, 100, 0.0, 0.03,
+    ));
 
     let last_fitnesses = run_and_report(&mut evo, generations, &evaluate);
 
@@ -125,7 +127,9 @@ fn resume(generations: usize) {
 
     println!("Resuming from generation {starting_gen}...");
 
-    let evaluate = make_evaluate_minimax(size_penalty::seasonal_with_threshold(20, 100, 0.0, 0.03));
+    let evaluate = make_evaluate_minimax(size_penalty::seasonal_connections_with_threshold(
+        20, 100, 0.0, 0.03,
+    ));
 
     let last_fitnesses = run_and_report(&mut evo, generations, &evaluate);
 

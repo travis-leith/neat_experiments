@@ -1,7 +1,7 @@
 use crate::tictactoe::game::*;
 use crate::tictactoe::minimax::score_against_perfect_play;
 use crate::tictactoe::neat_agent::{board_to_inputs, outputs_to_move};
-use crate::tictactoe::size_penalty;
+use crate::tictactoe::size_penalty::{self, NetworkSize};
 use neat_experiments::neat::evolution::Match;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -9,11 +9,8 @@ use rand::SeedableRng;
 /// Evaluate a single organism by playing one game as Cross and one as Circle
 /// against a perfect opponent that randomizes among optimal moves.
 ///
-/// Fitness = fraction of moves that matched perfect play across both games.
-///
-/// Each organism gets its own RNG derived from the match seed and its index
-/// within the match, ensuring deterministic but high-quality randomisation.
-fn evaluate_organism(m: &mut Match, organism_idx: usize) -> (f64, usize) {
+/// Returns (raw_fitness, network_size).
+fn evaluate_organism(m: &mut Match, organism_idx: usize) -> (f64, NetworkSize) {
     let mut rng = StdRng::seed_from_u64(m.seed.wrapping_add(organism_idx as u64));
 
     let mut total_correct: u32 = 0;
@@ -52,28 +49,54 @@ fn evaluate_organism(m: &mut Match, organism_idx: usize) -> (f64, usize) {
         (total_correct as f64) / (total_moves as f64)
     };
 
-    let node_count = m.organisms[organism_idx].node_count();
-    (raw_fitness, node_count)
+    let network_size = NetworkSize {
+        nodes: m.organisms[organism_idx].node_count(),
+        connections: m.organisms[organism_idx].connection_count(),
+    };
+
+    (raw_fitness, network_size)
 }
 
-/// Evaluation function compatible with the Evolution framework.
+/// Build an evaluation function with the given size penalty strategy.
 ///
-/// Each organism in the match is independently scored against perfect play.
-/// Called once per match; the framework handles running multiple matches per
-/// organism via `MatchConfig::matches_per_organism`.
+/// # Example
+///
+/// ```ignore
+/// use tictactoe::size_penalty;
+///
+/// // No penalty
+/// let eval = make_evaluate_minimax(size_penalty::no_penalty);
+///
+/// // Penalise both nodes and connections
+/// let eval = make_evaluate_minimax(size_penalty::compose(
+///     size_penalty::threshold_nodes(25, 0.02),
+///     size_penalty::threshold_connections(40, 0.01),
+/// ));
+///
+/// // Seasonal on connections with threshold
+/// let eval = make_evaluate_minimax(
+///     size_penalty::seasonal_connections_with_threshold(30, 100, 0.0, 0.03),
+/// );
+/// ```
 pub fn make_evaluate_minimax<F>(penalty_fn: F) -> impl Fn(&mut Match, usize) + Send + Sync
 where
-    F: Fn(usize, usize) -> f64 + Send + Sync,
+    F: Fn(NetworkSize, usize) -> f64 + Send + Sync,
 {
     move |m: &mut Match, generation: usize| {
         for i in 0..m.organisms.len() {
-            let (raw_fitness, node_count) = evaluate_organism(m, i);
-            let penalized = size_penalty::apply(raw_fitness, node_count, generation, &penalty_fn);
+            let (raw_fitness, network_size) = evaluate_organism(m, i);
+            let penalized = size_penalty::apply(raw_fitness, network_size, generation, &penalty_fn);
 
             m.organisms[i].stats().increment("raw_fitness", raw_fitness);
             m.organisms[i]
                 .stats()
-                .increment("size_penalty_factor", penalty_fn(node_count, generation));
+                .increment("size_penalty_factor", penalty_fn(network_size, generation));
+            m.organisms[i]
+                .stats()
+                .increment("node_count", network_size.nodes as f64);
+            m.organisms[i]
+                .stats()
+                .increment("connection_count", network_size.connections as f64);
 
             m.organisms[i].add_fitness(penalized);
         }
@@ -82,10 +105,14 @@ where
 
 /// Evaluation function with no size penalty — backwards compatible.
 pub fn evaluate_minimax_fitness(m: &mut Match, generation: usize) {
-    let no_pen = size_penalty::no_penalty;
     for i in 0..m.organisms.len() {
-        let (raw_fitness, node_count) = evaluate_organism(m, i);
-        let fitness = size_penalty::apply(raw_fitness, node_count, generation, &no_pen);
+        let (raw_fitness, network_size) = evaluate_organism(m, i);
+        let fitness = size_penalty::apply(
+            raw_fitness,
+            network_size,
+            generation,
+            &size_penalty::no_penalty,
+        );
         m.organisms[i].add_fitness(fitness);
     }
 }
