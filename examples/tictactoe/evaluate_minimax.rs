@@ -50,8 +50,8 @@ fn evaluate_organism(m: &mut Match, organism_idx: usize) -> (f64, NetworkSize) {
     };
 
     let network_size = NetworkSize {
-        nodes: m.organisms[organism_idx].node_count(),
-        connections: m.organisms[organism_idx].connection_count(),
+        nodes: m.organisms[organism_idx].active_node_count(),
+        connections: m.organisms[organism_idx].active_connection_count(),
     };
 
     (raw_fitness, network_size)
@@ -98,6 +98,7 @@ where
                 .stats()
                 .increment("connection_count", network_size.connections as f64);
 
+            m.organisms[i].add_raw_fitness(raw_fitness);
             m.organisms[i].add_fitness(penalized);
         }
     }
@@ -113,6 +114,7 @@ pub fn evaluate_minimax_fitness(m: &mut Match, generation: usize) {
             generation,
             &size_penalty::no_penalty,
         );
+        m.organisms[i].add_raw_fitness(raw_fitness);
         m.organisms[i].add_fitness(fitness);
     }
 }

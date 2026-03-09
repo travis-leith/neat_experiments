@@ -26,7 +26,7 @@ const N_OUTPUTS: usize = 9;
 fn default_evolution_config() -> EvolutionConfig {
     let speciation_config = SpeciationConfig {
         compatibility_threshold: 0.3,
-        stagnation_limit: 30,
+        stagnation_limit: 300000,
         pruning_interval: Some(50),
         ..Default::default()
     };
@@ -67,12 +67,17 @@ where
 {
     evo.run(generations, evaluate, |report, _evo| {
         println!(
-            "Gen {:4} | best: {:6.4} | mean: {:6.4} | species: {:3} | pop: {} | compat thresh: {:3.5}",
+            "Gen {:4} | penalised: {:6.4} (best) {:6.4} (mean) | raw: {:6.4} (best) {:6.4} (mean) | best size: {}n/{}c | mean size: {}n/{}c | species: {:3} | compat: {:3.5}",
             report.generation,
-            report.best_fitness,
-            report.mean_fitness,
+            report.best_penalised_fitness,
+            report.mean_penalised_fitness,
+            report.best_raw_fitness,
+            report.mean_raw_fitness,
+            report.best_size.nodes,
+            report.best_size.connections,
+            report.mean_size.nodes,
+            report.mean_size.connections,
             report.species_count,
-            report.population_size,
             report.compatibility_threshold,
         );
     })
@@ -88,9 +93,7 @@ fn train(generations: usize, seed: u64) {
     // let evaluate = make_evaluate_minimax(size_penalty::no_penalty);
     // let evaluate = make_evaluate_minimax(size_penalty::threshold(25, 0.02));
     // let evaluate = make_evaluate_minimax(size_penalty::exponential_with_threshold(20, 0.05));
-    let evaluate = make_evaluate_minimax(size_penalty::seasonal_connections_with_threshold(
-        20, 100, 0.0, 0.03,
-    ));
+    let evaluate = make_evaluate_minimax(size_penalty::threshold_connections(300, 0.001));
 
     let last_fitnesses = run_and_report(&mut evo, generations, &evaluate);
 
@@ -127,9 +130,7 @@ fn resume(generations: usize) {
 
     println!("Resuming from generation {starting_gen}...");
 
-    let evaluate = make_evaluate_minimax(size_penalty::seasonal_connections_with_threshold(
-        20, 100, 0.0, 0.03,
-    ));
+    let evaluate = make_evaluate_minimax(size_penalty::threshold_connections(300, 0.001));
 
     let last_fitnesses = run_and_report(&mut evo, generations, &evaluate);
 

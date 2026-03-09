@@ -115,7 +115,7 @@ where
             let phase = 2.0 * std::f64::consts::PI * (generation as f64) / (period as f64);
             let seasonal_factor = (1.0 + phase.cos()) / 2.0;
             let effective_rate = min_rate + (max_rate - min_rate) * seasonal_factor;
-            (1.0 - effective_rate * excess as f64).clamp(0.0, 1.0)
+            (1.0 - effective_rate * excess as f64).clamp(0.5, 1.0)
         }
     }
 }

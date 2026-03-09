@@ -412,6 +412,32 @@ impl Phenome {
         self.all_edges.len()
     }
 
+    /// Number of nodes that actually participate in activation
+    /// (all active sensor nodes + active non-sensor nodes).
+    pub fn active_node_count(&self) -> usize {
+        let active_sensor_count = self
+            .input_indices
+            .iter()
+            .filter(|&&i| {
+                self.active_component_indices
+                    .iter()
+                    .any(|&cid| self.components[cid].nodes.contains(&i))
+            })
+            .count();
+        active_sensor_count + self.active_non_sensor_nodes.len()
+    }
+
+    /// Number of enabled connections between active nodes.
+    pub fn active_connection_count(&self) -> usize {
+        self.active_component_indices
+            .iter()
+            .map(|&cid| {
+                let comp = &self.components[cid];
+                comp.external_edges.len() + comp.internal_edges.len()
+            })
+            .sum()
+    }
+
     pub fn from_genome(genome: &Genome) -> Result<Self, PhenomeError> {
         Self::from_genome_with_config(genome, ActivationConfig::default())
     }
