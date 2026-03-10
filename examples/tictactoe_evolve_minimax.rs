@@ -26,8 +26,11 @@ const N_OUTPUTS: usize = 9;
 fn default_evolution_config() -> EvolutionConfig {
     let speciation_config = SpeciationConfig {
         compatibility_threshold: 0.3,
-        stagnation_limit: 300000,
+        stagnation_limit: 500000000000,
         pruning_interval: Some(50),
+        target_species_count: 10,
+        species_count_lower_bound: 3,
+        species_count_upper_bound: 30,
         ..Default::default()
     };
     EvolutionConfig {
@@ -93,7 +96,7 @@ fn train(generations: usize, seed: u64) {
     // let evaluate = make_evaluate_minimax(size_penalty::no_penalty);
     // let evaluate = make_evaluate_minimax(size_penalty::threshold(25, 0.02));
     // let evaluate = make_evaluate_minimax(size_penalty::exponential_with_threshold(20, 0.05));
-    let evaluate = make_evaluate_minimax(size_penalty::threshold_connections(300, 0.001));
+    let evaluate = make_evaluate_minimax(size_penalty::threshold_nodes(28, 0.001));
 
     let last_fitnesses = run_and_report(&mut evo, generations, &evaluate);
 
@@ -130,7 +133,7 @@ fn resume(generations: usize) {
 
     println!("Resuming from generation {starting_gen}...");
 
-    let evaluate = make_evaluate_minimax(size_penalty::threshold_connections(300, 0.001));
+    let evaluate = make_evaluate_minimax(size_penalty::threshold_nodes(28, 0.001));
 
     let last_fitnesses = run_and_report(&mut evo, generations, &evaluate);
 

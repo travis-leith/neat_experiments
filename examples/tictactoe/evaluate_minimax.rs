@@ -43,11 +43,7 @@ fn evaluate_organism(m: &mut Match, organism_idx: usize) -> (f64, NetworkSize) {
         .stats()
         .increment("total_moves", total_moves as f64);
 
-    let raw_fitness = if total_moves == 0 {
-        0.0
-    } else {
-        (total_correct as f64) / (total_moves as f64)
-    };
+    let raw_fitness = total_correct as f64;
 
     let network_size = NetworkSize {
         nodes: m.organisms[organism_idx].active_node_count(),

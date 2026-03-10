@@ -1,6 +1,6 @@
 use super::genome::distance::genetic_distance;
 use super::genome::types::{DistanceCoefficients, Genome};
-use rand::seq::{IndexedRandom, SliceRandom};
+use rand::seq::IndexedRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -33,10 +33,13 @@ pub struct Species {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeciationConfig {
     pub target_species_count: usize,
+    pub species_count_lower_bound: usize,
+    pub species_count_upper_bound: usize,
     pub compatibility_threshold: f64,
     pub compatibility_threshold_min: f64,
     pub compatibility_threshold_max: f64,
     pub threshold_adjustment_rate: f64,
+    pub threshold_adjustment_max_iterations: usize,
     pub distance_coefficients: DistanceCoefficients,
     pub stagnation_limit: usize,
     pub representative_strategy: RepresentativeStrategy,
@@ -47,10 +50,13 @@ impl Default for SpeciationConfig {
     fn default() -> Self {
         Self {
             target_species_count: 10,
+            species_count_lower_bound: 5,
+            species_count_upper_bound: 15,
             compatibility_threshold: 3.0,
             compatibility_threshold_min: 0.001,
             compatibility_threshold_max: 50.0,
             threshold_adjustment_rate: 0.1,
+            threshold_adjustment_max_iterations: 20,
             distance_coefficients: DistanceCoefficients::default(),
             stagnation_limit: 50,
             representative_strategy: RepresentativeStrategy::default(),
@@ -66,19 +72,90 @@ pub fn should_prune(generation: usize, config: &SpeciationConfig) -> bool {
     }
 }
 
-fn adjust_compatibility_threshold(config: &SpeciationConfig, current_species_count: usize) -> f64 {
-    let delta = config.compatibility_threshold * config.threshold_adjustment_rate;
-    let adjusted = if current_species_count > config.target_species_count {
-        config.compatibility_threshold + delta
-    } else if current_species_count < config.target_species_count {
-        config.compatibility_threshold - delta
+fn count_species_at_threshold(
+    genomes: &[Genome],
+    representatives: &[Genome],
+    threshold: f64,
+    coefficients: DistanceCoefficients,
+) -> usize {
+    let mut count = representatives.len();
+    for genome in genomes {
+        let compatible = representatives
+            .iter()
+            .any(|rep| genetic_distance(rep, genome, coefficients) < threshold);
+        if !compatible {
+            count += 1;
+        }
+    }
+    count
+}
+
+fn adjust_threshold_step(threshold: f64, rate: f64, increase: bool) -> f64 {
+    let delta = threshold * rate;
+    if increase {
+        threshold + delta
     } else {
-        config.compatibility_threshold
-    };
-    adjusted.clamp(
-        config.compatibility_threshold_min,
-        config.compatibility_threshold_max,
-    )
+        threshold - delta
+    }
+}
+
+/// Iteratively adjust the compatibility threshold until the species count
+/// is on the correct side of the target. Only called when bounds are breached.
+fn search_threshold_to_target(
+    genomes: &[Genome],
+    representatives: &[Genome],
+    config: &SpeciationConfig,
+    current_count: usize,
+) -> f64 {
+    let too_many = current_count > config.species_count_upper_bound;
+    let too_few = current_count < config.species_count_lower_bound;
+
+    if !too_many && !too_few {
+        return config.compatibility_threshold;
+    }
+
+    // too_many => increase threshold to merge species
+    // too_few  => decrease threshold to split species
+    let increase = too_many;
+    let target = config.target_species_count;
+
+    let mut threshold = config.compatibility_threshold;
+
+    for _ in 0..config.threshold_adjustment_max_iterations {
+        threshold = adjust_threshold_step(threshold, config.threshold_adjustment_rate, increase);
+        threshold = threshold.clamp(
+            config.compatibility_threshold_min,
+            config.compatibility_threshold_max,
+        );
+
+        let trial_count = count_species_at_threshold(
+            genomes,
+            representatives,
+            threshold,
+            config.distance_coefficients,
+        );
+
+        // If we were over the upper bound, we want to reach target or below.
+        // If we were under the lower bound, we want to reach target or above.
+        let satisfied = if increase {
+            trial_count <= target
+        } else {
+            trial_count >= target
+        };
+
+        if satisfied {
+            return threshold;
+        }
+
+        // Stop if we've hit the clamp limits
+        if threshold <= config.compatibility_threshold_min
+            || threshold >= config.compatibility_threshold_max
+        {
+            return threshold;
+        }
+    }
+
+    threshold
 }
 
 fn find_compatible_species(
@@ -151,6 +228,13 @@ fn retain_and_update_representatives<R: Rng>(
         .collect()
 }
 
+fn collect_representatives(previous_species: &[Species]) -> Vec<Genome> {
+    previous_species
+        .iter()
+        .map(|s| s.representative.clone())
+        .collect()
+}
+
 pub fn speciate<R: Rng>(
     genomes: &[Genome],
     previous_species: &[Species],
@@ -158,8 +242,16 @@ pub fn speciate<R: Rng>(
     next_species_id: &mut u64,
     rng: &mut R,
 ) -> Vec<Species> {
+    let representatives = collect_representatives(previous_species);
     let previous_count = previous_species.len().max(1);
-    config.compatibility_threshold = adjust_compatibility_threshold(config, previous_count);
+
+    // Only adjust threshold when bounds are breached
+    if previous_count > config.species_count_upper_bound
+        || previous_count < config.species_count_lower_bound
+    {
+        config.compatibility_threshold =
+            search_threshold_to_target(genomes, &representatives, config, previous_count);
+    }
 
     let mut species: Vec<Species> = previous_species
         .iter()
